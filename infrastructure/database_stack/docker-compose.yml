@@ -6,26 +6,22 @@
 services:
   # ===== PostgreSQL - TimescaleDB Service Configuration =====
   lsmp-postgres:
-    image: timescale/timescaledb:${VERSION}
+    image: timescale/timescaledb:${VERSION:-latest-pg15}
     container_name: lsmp-postgres
     restart: always
     ports:
       - "5432:5432"
     environment:
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres_password}
+      - POSTGRES_DB=${POSTGRES_DB:-lsmp_db}
     volumes:
-      # Mount the local directory for PostgreSQL data persistence
+      # Storage data
       - ./.data:/var/lib/postgresql/data
+      # Automation load database
       - ./schema.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d lsmp_db"]
       interval: 10s
       timeout: 5s
       retries: 5
-
-# ====== Volume Configuration ======
-volumes:
-  pg_data:
-    driver: local
