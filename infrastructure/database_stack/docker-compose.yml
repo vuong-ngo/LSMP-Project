@@ -1,0 +1,31 @@
+# ======================================
+# file: docker-compose.yml
+# description: Docker Compose file for setting up a PostgreSQL database with TimescaleDB extension.
+# ======================================
+
+services:
+  # ===== PostgreSQL - TimescaleDB Service Configuration =====
+  lsmp-postgres:
+    image: timescale/timescaledb:${VERSION}
+    container_name: lsmp-postgres
+    restart: always
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      # Mount the local directory for PostgreSQL data persistence
+      - ./.data:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+# ====== Volume Configuration ======
+volumes:
+  pg_data:
+    driver: local
