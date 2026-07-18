@@ -1,109 +1,157 @@
 -- ============================================================================
+-- file: schema.sql
 -- LSMP Database Schema Initialization Script
 -- Target Database: PostgreSQL with TimescaleDB Extension
 -- ============================================================================
 
--- Kích hoạt extension hỗ trợ sinh mã UUID ngẫu nhiên
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
 -- ============================================================================
--- 9.1 LOG_EVENT (Bảng lưu trữ logs/alerts cấu trúc nhận từ Wazuh Manager)
+-- 1. LOG_EVENT
 -- ============================================================================
 CREATE TABLE log_event (
-    event_id        UUID DEFAULT uuid_generate_v4(),
-    timestamp       TIMESTAMP NOT NULL,
+    event_id        UUID DEFAULT gen_random_uuid(),
+    "timestamp"     TIMESTAMPTZ NOT NULL,
     source_ip       VARCHAR(45),
     username        VARCHAR(100),
     event_type      VARCHAR(20) NOT NULL CHECK (event_type IN ('auth', 'nginx')),
-    severity        INT NOT NULL DEFAULT 0 CHECK (severity BETWEEN 0 AND 15),
+    severity        INT NOT NULL DEFAULT 0 CHECK (severity BETWEEN 0 AND 16),
     raw_log         TEXT NOT NULL,
     parsed_json     JSONB,
     agent_id        VARCHAR(50),
-    PRIMARY KEY (event_id, timestamp)
+    PRIMARY KEY (event_id, "timestamp")   -- composite PK required for hypertable
 );
 
--- Chỉ mục tối ưu hóa cho truy vấn theo IP và thời gian (vẽ biểu đồ dashboard)
-CREATE INDEX idx_log_event_srcip_time ON log_event (source_ip, timestamp DESC);
--- Chỉ mục tối ưu hóa cho truy vấn theo thiết bị giám sát (Agent)
-CREATE INDEX idx_log_event_agent ON log_event (agent_id, timestamp DESC);
+CREATE INDEX idx_log_event_srcip_time ON log_event (source_ip, "timestamp" DESC);
+CREATE INDEX idx_log_event_agent      ON log_event (agent_id, "timestamp" DESC);
 
 
 -- ============================================================================
--- 9.2 ANOMALY_RESULT (Bảng lưu trữ kết quả phân tích AI & Đặc trưng hành vi)
+-- 2. ANOMALY_RESULT
 -- ============================================================================
 CREATE TABLE anomaly_result (
-    id                  UUID DEFAULT uuid_generate_v4(),
-    window_start        TIMESTAMP NOT NULL,               -- Mốc bắt đầu cửa sổ trượt 60 giây
+    id                  UUID DEFAULT gen_random_uuid(),
+    window_start        TIMESTAMPTZ NOT NULL,             -- start of 60-second sliding window
     src_ip              VARCHAR(45) NOT NULL,
-    event_id            UUID,                             -- Khóa ngoại logic trỏ tới log_event(event_id)
-    feature_snapshot    JSONB NOT NULL,                   -- Snapshot chứa 14 đặc trưng AI phục vụ retrain
+    event_id            UUID,                             -- logical FK -> log_event(event_id)
+    feature_snapshot    JSONB NOT NULL,                   -- 14 AI features, used for retraining
     anomaly_score       FLOAT NOT NULL CHECK (anomaly_score BETWEEN 0 AND 1),
     model_version       VARCHAR(50) NOT NULL,
     predicted_label     VARCHAR(10) NOT NULL CHECK (predicted_label IN ('Normal','Anomaly')),
-    ground_truth_label  VARCHAR(10) CHECK (ground_truth_label IN ('Normal','Anomaly', NULL)),
-    label_source        VARCHAR(30),                      -- 'lab_scenario' / 'analyst_confirmed' / NULL
+    ground_truth_label  VARCHAR(10) CHECK (ground_truth_label IN ('Normal','Anomaly')),
+    label_source        VARCHAR(30),                      -- 'lab_scenario' / 'analyst_confirmed'
     PRIMARY KEY (id, window_start),
     UNIQUE (window_start, src_ip, model_version)
 );
 
--- Chỉ mục cho IP và thời gian đánh giá bất thường
 CREATE INDEX idx_anomaly_srcip_time ON anomaly_result (src_ip, window_start DESC);
--- Chỉ mục lọc nhanh dữ liệu đã có nhãn kiểm định để huấn luyện lại AI
-CREATE INDEX idx_anomaly_label ON anomaly_result (ground_truth_label) WHERE ground_truth_label IS NOT NULL;
+CREATE INDEX idx_anomaly_label      ON anomaly_result (ground_truth_label) WHERE ground_truth_label IS NOT NULL;
 
 
 -- ============================================================================
--- 9.3 RISK_SCORE (Bảng lưu trữ điểm rủi ro cuối cùng hiển thị trên Dashboard)
+-- 3. RISK_SCORE
 -- ============================================================================
 CREATE TABLE risk_score (
-    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    src_ip              VARCHAR(45) NOT NULL,             -- IP nguồn bị đánh giá rủi ro (đối tượng giám sát)
-    asset_id            VARCHAR(50),                      -- Thiết bị/Host chịu ảnh hưởng
-    anomaly_result_id   UUID,                             -- Khóa ngoại logic trỏ tới anomaly_result(id)
-    ai_component        FLOAT,                            -- Thành phần đóng góp của AI (alpha * anomaly_score)
-    rule_component       FLOAT,                            -- Thành phần đóng góp của Wazuh (beta * severity)
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    src_ip              VARCHAR(45) NOT NULL,
+    asset_id            VARCHAR(50),
+    anomaly_result_id   UUID,                             -- logical FK -> anomaly_result(id)
+    ai_component        FLOAT,
+    rule_component       FLOAT,
     score                FLOAT NOT NULL CHECK (score BETWEEN 0 AND 100),
     risk_class           VARCHAR(10) CHECK (risk_class IN ('Low','Medium','High','Critical')),
-    timestamp            TIMESTAMP NOT NULL DEFAULT now()
+    "timestamp"          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (anomaly_result_id)                            -- enforces 1-to-1 relationship with anomaly_result
 );
 
--- Chỉ mục cho IP và thời gian đánh giá rủi ro
-CREATE INDEX idx_risk_srcip_time ON risk_score (src_ip, timestamp DESC);
--- Chỉ mục lọc phân cấp độ nguy hiểm để Dashboard query nhanh
-CREATE INDEX idx_risk_class ON risk_score (risk_class, timestamp DESC);
+CREATE INDEX idx_risk_srcip_time ON risk_score (src_ip, "timestamp" DESC);
+CREATE INDEX idx_risk_class      ON risk_score (risk_class, "timestamp" DESC);
+-- Note: UNIQUE (anomaly_result_id) automatically creates an index on this column.
 
 
 -- ============================================================================
--- 9.4 ATTACK_SCENARIOS (Bảng phụ trợ lưu mốc thời gian kịch bản chạy Lab)
+-- 4. ATTACK_SCENARIOS
 -- ============================================================================
 CREATE TABLE attack_scenarios (
     id              SERIAL PRIMARY KEY,
     scenario_name   VARCHAR(100) NOT NULL,
-    attack_type     VARCHAR(50) NOT NULL,
-    start_time      TIMESTAMP NOT NULL,
-    end_time        TIMESTAMP NOT NULL,
+    attack_type     VARCHAR(50) NOT NULL CHECK (attack_type IN ('ssh_bruteforce', 'web_bruteforce')),
+    start_time      TIMESTAMPTZ NOT NULL,
+    end_time        TIMESTAMPTZ NOT NULL,
     attacker_ip     VARCHAR(45) NOT NULL,
     CHECK (end_time > start_time)
 );
 
+CREATE INDEX idx_attack_scenarios_time ON attack_scenarios (start_time, end_time);
+CREATE INDEX idx_attack_scenarios_ip   ON attack_scenarios (attacker_ip);
+
 
 -- ============================================================================
--- CẤU HÌNH TIMESCALEDB HYPERTABLES (Tối ưu hóa ghi logs chuỗi thời gian lớn)
+-- 5. EVALUATION_METRICS
 -- ============================================================================
--- Lưu ý: Cần kích hoạt extension TimescaleDB trên database trước khi chạy lệnh này.
--- Nếu chạy trên Postgres thuần túy, vui lòng bỏ qua các câu lệnh dưới đây.
+CREATE TABLE evaluation_metrics (
+    id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_id                      VARCHAR(100) NOT NULL,      -- groups multiple rows from the same evaluation run
+    model_config                VARCHAR(30) NOT NULL CHECK (
+        model_config IN ('wazuh_rule_only', 'iforest_only', 'ocsvm_only', 'cascade_iforest_ocsvm')
+    ),
+    model_version               VARCHAR(50),                -- matches anomaly_result.model_version if applicable
+    dataset_split                VARCHAR(50) NOT NULL,       -- e.g. 'test', 'lab_ssh', 'lab_web', 'cicids2017'
+    precision_score              FLOAT CHECK (precision_score BETWEEN 0 AND 1),
+    recall_score                 FLOAT CHECK (recall_score BETWEEN 0 AND 1),
+    f1_score                     FLOAT CHECK (f1_score BETWEEN 0 AND 1),
+    false_positive_rate          FLOAT CHECK (false_positive_rate BETWEEN 0 AND 1),
+    roc_auc                      FLOAT CHECK (roc_auc BETWEEN 0 AND 1),
+    latency_ms_avg                FLOAT,
+    latency_ms_p95                FLOAT,
+    throughput_events_per_sec     FLOAT,
+    cpu_usage_percent              FLOAT,
+    ram_usage_mb                    FLOAT,
+    hyperparameters                 JSONB,                  -- params used for this run (n_estimators, nu, gamma...)
+    evaluated_at                     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (run_id, model_config, dataset_split)
+);
+
+CREATE INDEX idx_eval_metrics_run    ON evaluation_metrics (run_id);
+CREATE INDEX idx_eval_metrics_config ON evaluation_metrics (model_config, evaluated_at DESC);
+
+
+-- ============================================================================
+-- TIMESCALEDB HYPERTABLES CONFIGURATION (log_event and anomaly_result only)
+-- ============================================================================
 
 DO $$
 BEGIN
+    BEGIN
+        CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
+    EXCEPTION WHEN others THEN
+        RAISE NOTICE 'TimescaleDB extension library not active. Running on standard PostgreSQL.';
+    END;
+
     IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
-        -- Phân vùng bảng log_event theo ngày (1 day interval) để chống nghẽn ghi log thô
+        -- log_event: partition by day, compress after 7 days, retain for 90 days
         PERFORM create_hypertable('log_event', 'timestamp', chunk_time_interval => INTERVAL '1 day', if_not_exists => TRUE);
-        
-        -- Phân vùng bảng anomaly_result theo tuần (7 days interval)
+        ALTER TABLE log_event SET (
+            timescaledb.compress,
+            timescaledb.compress_segmentby = 'event_type, source_ip',
+            timescaledb.compress_orderby = 'timestamp DESC'
+        );
+        PERFORM add_compression_policy('log_event', INTERVAL '7 days', if_not_exists => TRUE);
+        PERFORM add_retention_policy('log_event', INTERVAL '90 days', if_not_exists => TRUE);
+
+        -- anomaly_result: partition by week, compress after 30 days, NO retention
+        -- (kept long-term as training data for AI model retraining)
         PERFORM create_hypertable('anomaly_result', 'window_start', chunk_time_interval => INTERVAL '7 days', if_not_exists => TRUE);
-        
-        RAISE NOTICE 'TimescaleDB hypertables successfully initialized.';
+        ALTER TABLE anomaly_result SET (
+            timescaledb.compress,
+            timescaledb.compress_segmentby = 'src_ip, model_version',
+            timescaledb.compress_orderby = 'window_start DESC'
+        );
+        PERFORM add_compression_policy('anomaly_result', INTERVAL '30 days', if_not_exists => TRUE);
+
+        -- risk_score, attack_scenarios, evaluation_metrics: kept as regular tables
+        -- (no hypertable) as per the 5-table classification.
+
+        RAISE NOTICE 'TimescaleDB hypertables, compression, and retention policies successfully initialized.';
     ELSE
-        RAISE NOTICE 'TimescaleDB extension not found. Running on standard PostgreSQL partitioning.';
+        RAISE NOTICE 'TimescaleDB extension not found. Running on standard PostgreSQL.';
     END IF;
 END $$;
