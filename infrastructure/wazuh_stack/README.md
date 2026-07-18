@@ -10,7 +10,6 @@ This directory contains the Docker Compose configurations and environment files 
 infrastructure/wazuh_stack/
 ├── docker-compose.yml             # Main Wazuh stack (Manager, Indexer, Dashboard)
 ├── generate-indexer-certs.yml     # Cert generator service helper
-├── .env.example                   # Environment configuration variables template
 ├── README.md                      # This documentation file
 └── config/                        # Security and service configuration mounts
     ├── certs.yml                  # Nodes certificate definition
@@ -53,17 +52,7 @@ To make this setting permanent across system reboots, append the following line 
 vm.max_map_count=262144
 ```
 
-### 2. Environment Setup
-
-Copy the environment template and set your credentials:
-
-```bash
-cp .env.example .env
-```
-
-*Note: Make sure to update passwords for production environments.*
-
-### 3. Generate TLS Certificates
+### 2. Generate TLS Certificates
 
 Wazuh components enforce TLS-only communications. Generate local certificates using the certs-generator container helper:
 
@@ -73,7 +62,7 @@ docker compose -f generate-indexer-certs.yml run --rm generator
 
 *This command creates node certificates in the `config/wazuh_indexer_ssl_certs/` directory and exits immediately.*
 
-### 4. Start the Wazuh Stack
+### 3. Start the Wazuh Stack
 
 #### A. Run in the Foreground (for inspection/debugging)
 
@@ -94,7 +83,6 @@ docker compose -f docker-compose.yml up -d
 Once the services are fully initialized and healthy:
 
 1. Open your web browser and navigate to: `https://localhost` (Ignore the self-signed certificate warning).
-2. Authenticate using the default administrator credentials configured in your `.env` file.
 
 ---
 
