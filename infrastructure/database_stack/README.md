@@ -59,7 +59,7 @@ Ensure you have Docker and Docker Compose (v2+) installed on your machine.
 ### 2. Configuration
 Copy the environment variables template and configure your credentials if necessary:
 ```bash
-cp infrastructure/database_stack/.env.example infrastructure/database_stack/.env
+cp .env.example .env
 ```
 
 ### 3. Startup & Operations
@@ -67,20 +67,20 @@ All commands should be executed using the control scripts located in the `script
 
 > **Important**: Ensure scripts have execution permissions before running them:
 > ```bash
-> chmod +x infrastructure/database_stack/scripts/*.sh
+> chmod +x scripts/*.sh
 > ```
 
 #### A. Start the Database Stack
 To launch the database container normally (retaining existing data):
 ```bash
-./infrastructure/database_stack/scripts/run.sh
+./scripts/run.sh
 ```
 *If starting for the first time or if tables are missing, the script will automatically initialize the database schema from `schema.sql` once the container becomes healthy.*
 
 #### B. Clean & Reinitialize (Fresh Start)
 To discard all local data, perform backup, and start with a fresh schema:
 ```bash
-./infrastructure/database_stack/scripts/run.sh clear
+./scripts/run.sh clear
 ```
 *This will:*
 1.  Verify if the container is running and generate a **logical schema/data backup** (`.sql.gz`) as well as a **physical archive** of the database volume (`.tar.gz`) under the `backups/` directory.
@@ -90,17 +90,17 @@ To discard all local data, perform backup, and start with a fresh schema:
 #### C. Stop the Stack
 To safely stop the database service without losing data:
 ```bash
-./infrastructure/database_stack/scripts/stop.sh
+./scripts/stop.sh
 ```
 
 To stop the containers and wipe Docker-managed container configurations:
 ```bash
-./infrastructure/database_stack/scripts/stop.sh remove
+./scripts/stop.sh remove
 ```
 
 #### D. Verify & Test Schema Constraints
 To validate schema structure, boundary limits, `CHECK` expressions, and logic validation queries:
 ```bash
-./infrastructure/database_stack/scripts/test.sh
+./scripts/test.sh
 ```
 *This executes a sandbox transaction verification loop utilizing Postgres `SAVEPOINT`s to verify that invalid configurations are rejected and correct relationships function properly.*
