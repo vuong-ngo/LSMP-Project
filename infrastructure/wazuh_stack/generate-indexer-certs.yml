@@ -2,8 +2,6 @@
 # file: generate-indexer-certs.yml
 # description: Generate indexer SSL certificates
 # ============================================================================
-# Wazuh App Copyright (C) 2017, Wazuh Inc. (License GPLv2)
-version: '3.7'
 
 services:
   # ===== Generate indexer SSL certificates =====

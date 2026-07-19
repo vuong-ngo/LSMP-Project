@@ -2,8 +2,6 @@
 # file: docker-compose.yml
 # description: Wazuh stack (Wazuh Manager, Wazuh Indexer, Wazuh Dashboard)
 # ============================================================================
-# Wazuh App Copyright (C) 2017, Wazuh Inc. (License GPLv2)
-version: '3.7'
 
 services:
   # ===== Wazuh Manager Service Configuration =====
