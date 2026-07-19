@@ -18,7 +18,7 @@ services:
       - PGDATA=/var/lib/postgresql/data/pgdata
     volumes:
       # Storage data
-      - ./data_postgresql:/var/lib/postgresql/data
+      - postgresql_data:/var/lib/postgresql/data
     command: >
       postgres
       -c shared_buffers=512MB
@@ -33,3 +33,5 @@ services:
       timeout: 5s
       retries: 5
 
+volumes:
+  postgresql_data:
