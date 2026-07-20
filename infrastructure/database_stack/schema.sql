@@ -14,6 +14,7 @@ CREATE TABLE log_event (
     username        VARCHAR(100),
     event_type      VARCHAR(20) NOT NULL CHECK (event_type IN ('auth', 'nginx')),
     severity        INT NOT NULL DEFAULT 0 CHECK (severity BETWEEN 0 AND 16),
+    rule_id         INT,                  -- ID luat Wazuh sinh ra alert (vd: 5712 cho SSH brute force)
     raw_log         TEXT NOT NULL,
     parsed_json     JSONB,
     agent_id        VARCHAR(50),
