@@ -19,7 +19,7 @@ services:
     ports:
       - "1514:1514"
       - "1515:1515"
-      - "514:514/udp"
+      - "514:514/tcp"
       - "55000:55000"
     environment:
       - INDEXER_URL=https://wazuh.indexer:9200
@@ -108,6 +108,7 @@ volumes:
   wazuh_api_configuration:
   wazuh_etc:
   wazuh_logs:
+    name: wazuh_logs
   wazuh_queue:
   wazuh_var_multigroups:
   wazuh_integrations:
