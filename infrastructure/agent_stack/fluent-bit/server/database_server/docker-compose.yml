@@ -1,0 +1,88 @@
+# ============================================================================
+# file: database_server/docker-compose.yml
+# Chay tren MAY DATABASE & AI (Server B).
+# ============================================================================
+# CHANGELOG:
+#  [FIX] Them service lsmp-ingest (cau noi http -> redis.xadd()), thay the
+#        cho output "redis" khong ton tai cua Fluent Bit.
+#  [FIX] Bo host.docker.internal/extra_hosts. Neu database_stack (Postgres)
+#        chay CUNG MAY nay, dung chung 1 Docker network ("lsmp_backend") de
+#        goi nhau qua ten service - khong can publish port 5432 ra host/mang
+#        that nua (an toan hon nhieu, khong con phai lo tuong lua/whitelist
+#        cho Postgres).
+#  [YEU CAU] Phai tao network truoc: `docker network create lsmp_backend`
+#        (chi can chay 1 lan, dung chung cho ca database_server va
+#        database_stack).
+# ============================================================================
+
+
+services:
+  # ===== Redis: Hang doi dem (Stream) =====
+  lsmp-redis:
+    image: redis:7.2-alpine
+    container_name: lsmp-redis
+    restart: always
+    networks:
+      - lsmp_backend
+    volumes:
+      - redis_data:/data
+    command: redis-server --requirepass "${REDIS_PASSWORD:?can dat REDIS_PASSWORD trong .env}" --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ===== Ingest Receiver: HTTP (tu Fluent Bit ben Server A) -> Redis XADD =====
+  lsmp-ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile.ingest
+    container_name: lsmp-ingest
+    restart: always
+    networks:
+      - lsmp_backend
+    ports:
+      # Mo ra mang that de Server A (may Wazuh) goi toi duoc.
+      # Da co xac thuc token o tang ung dung (xem ingest_receiver.py).
+      - "8080:8080"
+    environment:
+      - REDIS_HOST=lsmp-redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?can dat REDIS_PASSWORD trong .env}
+      - STREAM_KEY=wazuh_stream
+      - STREAM_MAXLEN=100000
+      - LISTEN_PORT=8080
+      - INGEST_TOKEN=${INGEST_TOKEN:?can dat token, phai KHOP voi wazuh_server/.env}
+    depends_on:
+      lsmp-redis:
+        condition: service_healthy
+
+  # ===== Database Writer: Redis Consume -> Postgres Batch Insert =====
+  lsmp-db-writer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lsmp-db-writer
+    restart: always
+    networks:
+      - lsmp_backend
+    environment:
+      - REDIS_HOST=lsmp-redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?can dat REDIS_PASSWORD trong .env}
+      # "lsmp-postgres" la ten service ben database_stack/docker-compose.yml,
+      # goi duoc truc tiep vi ca 2 stack cung join network "lsmp_backend".
+      - DATABASE_URL=postgresql://${DB_USER:-postgres}:${DB_PASSWORD:?can dat DB_PASSWORD trong .env}@lsmp-postgres:5432/${DB_NAME:-lsmp_db}
+      - BATCH_SIZE=500
+      - BATCH_TIMEOUT=2.0
+    depends_on:
+      lsmp-redis:
+        condition: service_healthy
+
+networks:
+  lsmp_backend:
+    external: true
+
+volumes:
+  redis_data:
