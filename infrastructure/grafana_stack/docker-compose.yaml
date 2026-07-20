@@ -10,14 +10,14 @@ networks:
 services:
   # ===== Read Service: Query Frontend (Servicediscovery-compatible) =====
   read:
-    image: grafana/loki:latest
+    image: grafana/loki:${LOKI_VERSION:-3.0.0}
     command: "-config.file=/etc/loki/config.yaml -target=read"
     ports:
       - 3101:3100
       - 7946
       - 9095
     volumes:
-      - ./loki-config.yaml:/etc/loki/config.yaml
+      - ./config/loki-config.yaml:/etc/loki/config.yaml
     depends_on:
       - minio
     healthcheck:
@@ -33,14 +33,14 @@ services:
 
   # ===== Write Service: Ingestion & Indexing =====
   write:
-    image: grafana/loki:latest
+    image: grafana/loki:${LOKI_VERSION:-3.0.0}
     command: "-config.file=/etc/loki/config.yaml -target=write"
     ports:
       - 3102:3100
       - 7946
       - 9095
     volumes:
-      - ./loki-config.yaml:/etc/loki/config.yaml
+      - ./config/loki-config.yaml:/etc/loki/config.yaml
     healthcheck:
       test: [ "CMD", "/usr/bin/loki", "-health" ]
       start_period: 30s
@@ -54,7 +54,7 @@ services:
 
   # ===== Storage Service: MinIO Object Storage =====
   minio:
-    image: minio/minio
+    image: minio/minio:${MINIO_VERSION:-RELEASE.2024-06-06T09-36-42Z}
     entrypoint:
       - sh
       - -euc
@@ -81,7 +81,7 @@ services:
 
   # ===== Visualization Service: Grafana =====
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:${GRAFANA_VERSION:-11.1.0}
     environment:
       - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
       - GF_AUTH_ANONYMOUS_ENABLED=true
@@ -118,9 +118,9 @@ services:
 
   # ===== Backend Service: Index store (Service Discovery - compatible) =====
   backend:
-    image: grafana/loki:latest
+    image: grafana/loki:${LOKI_VERSION:-3.0.0}
     volumes:
-      - ./loki-config.yaml:/etc/loki/config.yaml
+      - ./config/loki-config.yaml:/etc/loki/config.yaml
     ports:
       - "3100"
       - "7946"
@@ -138,7 +138,7 @@ services:
 
   # ===== Ingress Service: Nginx (Loki Service Discovery) =====
   gateway:
-    image: nginx:latest
+    image: nginx:${NGINX_VERSION:-1.27.0-alpine}
     depends_on:
       - read
       - write
@@ -208,7 +208,7 @@ services:
 
   # ===== Test Service: Flog (Log Generator) =====
   flog:
-    image: mingrammer/flog
+    image: mingrammer/flog:${FLOG_VERSION:-0.4.3}
     command: -f json -d 200ms -l
     networks:
       - loki
