@@ -19,6 +19,8 @@ services:
     volumes:
       # Storage data
       - postgresql_data:/var/lib/postgresql/data
+      # Init database
+      - ./schema.sql:/docker-entrypoint-initdb.d/init.sql
     command: >
       postgres
       -c shared_buffers=512MB
