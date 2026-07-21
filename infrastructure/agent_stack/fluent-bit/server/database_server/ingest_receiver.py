@@ -1,16 +1,6 @@
 # ============================================================================
 # file: database_server/ingest_receiver.py
-# Chay tren MAY DATABASE & AI (Server B), cung host voi lsmp-redis.
-#
-# Cau noi nhe giua Fluent Bit (output "http", format "json_lines", chay o
-# Server A - may Wazuh, qua mang that) va Redis Stream (XADD) - thay the cho
-# output plugin "redis" cua Fluent Bit von KHONG TON TAI trong image chinh
-# thuc (chi co plugin ben thu 3, va cac plugin do cung khong ho tro XADD).
-#
-# Co xac thuc bang token (header X-Ingest-Token) vi day la endpoint HTTP mo
-# ra mang that giua 2 may - khac voi ban chay chung 1 host truoc do.
-# Cố tinh chi dung http.server built-in (khong FastAPI/Flask) de giu dung
-# tinh than "nhe" cua kien truc chong nghen ban dau.
+# description: Runs on the DATABASE & AI SERVER (Server B), colocated with lsmp-redis.
 # ============================================================================
 
 import os
@@ -33,10 +23,10 @@ REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
 STREAM_KEY     = os.getenv("STREAM_KEY", "wazuh_stream")
 STREAM_MAXLEN  = int(os.getenv("STREAM_MAXLEN", 100000))
 LISTEN_PORT    = int(os.getenv("LISTEN_PORT", 8080))
-INGEST_TOKEN   = os.getenv("INGEST_TOKEN")  # bat buoc, khong co gia tri mac dinh
+INGEST_TOKEN   = os.getenv("INGEST_TOKEN")  # Required, no default value
 
 if not INGEST_TOKEN:
-    logger.critical("INGEST_TOKEN chua duoc thiet lap - tu choi khoi dong (tranh mo endpoint khong xac thuc ra mang that).")
+    logger.critical("INGEST_TOKEN is not set - refusing to start (to avoid exposing unauthenticated endpoints to the network).")
     sys.exit(1)
 
 redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD)
@@ -52,11 +42,12 @@ class IngestHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
-        # Xac thuc bang shared secret token - HTTP tu no khong co auth nhu
-        # Redis AUTH, phai tu them lop nay vi endpoint nay mo ra mang that.
+        # Authenticate using shared secret token - HTTP does not have native
+        # auth like Redis AUTH, so we implement this layer since the endpoint
+        # is exposed over the network.
         token = self.headers.get("X-Ingest-Token")
         if token != INGEST_TOKEN:
-            logger.warning(f"Tu choi request khong hop le tu {self.address_string()} (sai/thieu token).")
+            logger.warning(f"Rejected invalid request from {self.address_string()} (missing or incorrect token).")
             self.send_response(401)
             self.end_headers()
             return
@@ -65,7 +56,7 @@ class IngestHandler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(length).decode("utf-8", errors="replace")
         except Exception as e:
-            logger.error(f"Khong doc duoc request body: {e}")
+            logger.error(f"Failed to read request body: {e}")
             self.send_response(400)
             self.end_headers()
             return
@@ -86,9 +77,9 @@ class IngestHandler(BaseHTTPRequestHandler):
                 accepted += 1
             except Exception as e:
                 failed += 1
-                logger.warning(f"Bo qua ban ghi khong hop le: {e}")
+                logger.warning(f"Skipped invalid record: {e}")
 
-        logger.info(f"Da day {accepted} ban ghi vao Redis Stream '{STREAM_KEY}' ({failed} bi loai)")
+        logger.info(f"Pushed {accepted} records into Redis Stream '{STREAM_KEY}' ({failed} rejected)")
 
         if failed > 0 and accepted == 0:
             self.send_response(422)
@@ -98,16 +89,16 @@ class IngestHandler(BaseHTTPRequestHandler):
 
 
 def main():
-    logger.info(f"Ket noi Redis tai {REDIS_HOST}:{REDIS_PORT}")
+    logger.info(f"Connecting to Redis at {REDIS_HOST}:{REDIS_PORT}")
     try:
         redis_client.ping()
-        logger.info("Ket noi Redis thanh cong.")
+        logger.info("Successfully connected to Redis.")
     except Exception as e:
-        logger.critical(f"Khong the ket noi Redis: {e}")
+        logger.critical(f"Could not connect to Redis: {e}")
         sys.exit(1)
 
     server = ThreadingHTTPServer(("0.0.0.0", LISTEN_PORT), IngestHandler)
-    logger.info(f"LSMP Ingest Receiver dang lang nghe tai 0.0.0.0:{LISTEN_PORT}/ingest")
+    logger.info(f"LSMP Ingest Receiver listening at 0.0.0.0:{LISTEN_PORT}/ingest")
     server.serve_forever()
 
 
