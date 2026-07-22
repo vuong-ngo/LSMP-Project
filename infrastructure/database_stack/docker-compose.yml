@@ -6,7 +6,7 @@
 services:
   # ===== PostgreSQL - TimescaleDB Service Configuration =====
   lsmp-postgres:
-    image: timescale/timescaledb:${VERSION:-latest-pg15}
+    image: timescale/timescaledb:${VERSION_POSTGRES:-latest-pg15}
     container_name: lsmp-postgres
     restart: always
     ports:
@@ -21,6 +21,8 @@ services:
       - postgresql_data:/var/lib/postgresql/data
       # Init database
       - ./schema.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - lsmp_backend
     command: >
       postgres
       -c shared_buffers=512MB
@@ -34,6 +36,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+networks:
+  lsmp_backend:
+    external: true
 
 volumes:
   postgresql_data:

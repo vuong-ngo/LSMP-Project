@@ -32,7 +32,7 @@ The database consists of **6 main tables** optimized for high-volume time-series
 ### 1. Hypertables (TimescaleDB Optimized)
 
 * **`log_event`**
-  * **Description**: Stores raw, unstructured security alert logs forwarded from the Wazuh Manager. Now includes `source_host` (client hostname) and `rule_id` (Wazuh rule ID) columns to support multi-client collections.
+  * **Description**: Stores raw, unstructured security alert logs forwarded from the Wazuh Manager. Includes `source_host` (client hostname) and `rule_id` (Wazuh rule ID) columns to support multi-client collections.
   * **TimescaleDB Config**: Partitioned by day (`timestamp`).
   * **Policies**:
     * **Compression**: Enabled after 7 days (segmentby `event_type`, `source_ip`, and `source_host` for optimal storage and query efficiency across clients).
@@ -66,7 +66,15 @@ The database consists of **6 main tables** optimized for high-volume time-series
 
 Follow these steps to configure and launch the database stack:
 
-### 1. Environment Setup
+### 1. Prerequisites (Shared Network)
+
+Before running the database container, you must create the shared external bridge network `lsmp_backend` if it does not already exist:
+
+```bash
+docker network create lsmp_backend
+```
+
+### 2. Environment Setup
 
 Copy the environment template and set your credentials:
 
@@ -74,7 +82,9 @@ Copy the environment template and set your credentials:
 cp .env.example .env
 ```
 
-### 2. Start the Database Stack
+Open the `.env` file and verify or change the default PostgreSQL credentials as needed.
+
+### 3. Start the Database Stack
 
 #### A. Run in the Foreground (for inspection/debugging)
 
@@ -87,20 +97,6 @@ docker compose up
 ```bash
 docker compose up -d
 ```
-
-### 3. Initialize the Database Schema
-
-Since the schema is not automatically loaded at startup, you must initialize the database structure after the container starts and becomes healthy.
-
-Run the following command to load `schema.sql` into the database:
-
-```bash
-docker exec -i lsmp-postgres psql -U postgres -d lsmp_db < schema.sql
-```
-
-*(Note: Adjust the username `-U` and database name `-d` if you changed the defaults in your `.env` file.)*
-
----
 
 ## 🛑 Teardown & Maintenance
 

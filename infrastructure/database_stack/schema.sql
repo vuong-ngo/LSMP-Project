@@ -89,11 +89,11 @@ CREATE INDEX idx_anomaly_fv_id       ON anomaly_result (feature_vector_id);
 -- 4. RISK_SCORE
 -- ============================================================================
 CREATE TABLE risk_score (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    src_ip              VARCHAR(45) NOT NULL,
-    asset_id            VARCHAR(50),
-    anomaly_result_id   UUID,                             -- logical FK -> anomaly_result(id)
-    ai_component        FLOAT,
+    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    src_ip               VARCHAR(45) NOT NULL,
+    asset_id             VARCHAR(50),
+    anomaly_result_id    UUID,                             -- logical FK -> anomaly_result(id)
+    ai_component         FLOAT,
     rule_component       FLOAT,
     score                FLOAT NOT NULL CHECK (score BETWEEN 0 AND 100),
     risk_class           VARCHAR(10) CHECK (risk_class IN ('Low','Medium','High','Critical')),
@@ -127,25 +127,25 @@ CREATE INDEX idx_attack_scenarios_ip   ON attack_scenarios (attacker_ip);
 -- 6. EVALUATION_METRICS
 -- ============================================================================
 CREATE TABLE evaluation_metrics (
-    id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    run_id                      VARCHAR(100) NOT NULL,      -- groups multiple rows from the same evaluation run
-    model_config                VARCHAR(30) NOT NULL CHECK (
+    id                           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_id                       VARCHAR(100) NOT NULL,      -- groups multiple rows from the same evaluation run
+    model_config                 VARCHAR(30) NOT NULL CHECK (
         model_config IN ('wazuh_rule_only', 'iforest_only', 'ocsvm_only', 'cascade_iforest_ocsvm')
     ),
-    model_version               VARCHAR(50),                -- matches anomaly_result.model_version if applicable
+    model_version                VARCHAR(50),                -- matches anomaly_result.model_version if applicable
     dataset_split                VARCHAR(50) NOT NULL,       -- e.g. 'test', 'lab_ssh', 'lab_web', 'cicids2017'
     precision_score              FLOAT CHECK (precision_score BETWEEN 0 AND 1),
     recall_score                 FLOAT CHECK (recall_score BETWEEN 0 AND 1),
     f1_score                     FLOAT CHECK (f1_score BETWEEN 0 AND 1),
     false_positive_rate          FLOAT CHECK (false_positive_rate BETWEEN 0 AND 1),
     roc_auc                      FLOAT CHECK (roc_auc BETWEEN 0 AND 1),
-    latency_ms_avg                FLOAT,
-    latency_ms_p95                FLOAT,
-    throughput_events_per_sec     FLOAT,
-    cpu_usage_percent              FLOAT,
-    ram_usage_mb                    FLOAT,
-    hyperparameters                 JSONB,                  -- params used for this run (n_estimators, nu, gamma...)
-    evaluated_at                     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    latency_ms_avg               FLOAT,
+    latency_ms_p95               FLOAT,
+    throughput_events_per_sec    FLOAT,
+    cpu_usage_percent            FLOAT,
+    ram_usage_mb                 FLOAT,
+    hyperparameters              JSONB,                  -- params used for this run (n_estimators, nu, gamma...)
+    evaluated_at                 TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (run_id, model_config, dataset_split)
 );
 
