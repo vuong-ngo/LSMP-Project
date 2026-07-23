@@ -1,8 +1,16 @@
+# ============================================================================
+# file: models/base_model.py
+# Description: Abstract Base Class (ABC) defining the standard interface for all machine learning
+# models implemented in the Log Security Monitoring Platform (LSMP).
+# ============================================================================
+
+# ===== IMPORT MODULES =====
 from abc import ABC, abstractmethod
 import numpy as np
 import pandas as pd
 from typing import Any, Union
 
+# ===== Abstract Base Class for Models =====
 class BaseModel(ABC):
     """Abstract Base Class (ABC) defining the standard interface for all machine learning
     models implemented in the Log Security Monitoring Platform (LSMP).
