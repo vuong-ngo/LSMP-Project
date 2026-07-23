@@ -1,0 +1,44 @@
+# ============================================================================
+# file: data_config.yaml
+# Description: Configuration for Data
+# ============================================================================
+
+# This file contains the configuration for data processing and feature engineering.
+data:
+  # Feature columns used by the AI model (14 features)
+  features:
+    - login_fail_count
+    - unique_failed_ip_count
+    - fail_success_ratio
+    - ip_entropy
+    - hour_of_day
+    - request_rate
+    - status_4xx_rate
+    - url_frequency
+    - user_agent_entropy
+    - method_distribution
+    - time_window_count
+    - burst_rate
+    - sliding_window_count
+    - ip_switch_frequency
+
+  # Time window for sliding-window feature aggregation (minutes)
+  time_window_minutes: 1
+
+  # Train/test split ratio
+  train_test_split_ratio: 0.7
+
+  # Database table name mappings (must match schema.sql)
+  db_table_wazuh_alerts: "log_event"
+  db_table_features: "feature_vectors"
+  db_table_predictions: "risk_score"
+  db_table_labels: "anomaly_result"
+
+# File paths (used by build_features and data_loader)
+raw_data_path: "data/raw"
+processed_data_path: "data/processed"
+external_data_path: "data/external"
+train_ratio: 0.7
+test_ratio: 0.3
+window_minutes: 60
+feature_version: "v1"
