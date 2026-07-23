@@ -1,0 +1,16 @@
+# ============================================================================
+# file: logging.yaml
+# Description: Configuration for Logging
+# ============================================================================
+
+# Config level: INFO, DEBUG, WARNING, ERROR, CRITICAL
+level: "INFO"
+
+# File config
+file: "logs/lsmp_ai.log"
+
+# Rotate log when it reaches this size (in bytes)
+max_bytes: 10485760
+
+# Number of backup log files to keep
+backup_count: 5
