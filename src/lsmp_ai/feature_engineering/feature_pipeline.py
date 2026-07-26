@@ -56,7 +56,13 @@ class FeaturePipeline:
         if isinstance(X, pd.DataFrame):
             missing = [c for c in self.feature_cols if c not in X.columns]
             if not missing:
-                return X[self.feature_cols]
+                res = X[self.feature_cols].copy()
+                return res.replace([np.inf, -np.inf], np.nan)
+            return X.replace([np.inf, -np.inf], np.nan)
+        if isinstance(X, np.ndarray):
+            arr = np.copy(X)
+            arr[np.isinf(arr)] = np.nan
+            return arr
         return X
 
     def fit(self, X: Union[pd.DataFrame, np.ndarray]) -> 'FeaturePipeline':
@@ -126,8 +132,8 @@ class FeaturePipeline:
 
 # ===== Raw Log Feature Extraction Helper =====
 def extract_features_from_logs(
-    df_raw: pd.DataFrame, 
-    df_historical: Optional[pd.DataFrame] = None, 
+    df_raw: pd.DataFrame,
+    df_historical: Optional[pd.DataFrame] = None,
     window_start: Optional[datetime] = None
 ) -> pd.DataFrame:
     """Transforms raw log events in a time window into aggregate 14 AI feature vectors per src_ip.
