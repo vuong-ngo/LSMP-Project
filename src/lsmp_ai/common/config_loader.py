@@ -32,7 +32,7 @@ class SubConfig:
 class ModelConfig:
     def __init__(self, model_store_path: str = None, iforest_params: dict = None, ocsvm_params: dict = None, cascade_params: dict = None):
         self.model_store_path = model_store_path or os.getenv("MODEL_DIR", "models_store")
-        
+
         # Determine parameters
         iforest_dict = {
             "n_estimators": [100],
@@ -60,17 +60,17 @@ class ModelConfig:
         if cascade_params:
             cascade_dict.update(cascade_params)
 
-        
+
         # Standardize parameter dictionary values to list for index subscript compatibility [0]
         for d in [iforest_dict, ocsvm_dict, cascade_dict]:
             for k, v in d.items():
                 if not isinstance(v, list):
                     d[k] = [v]
-                    
+
         self.iforest = SubConfig(**iforest_dict)
         self.ocsvm = SubConfig(**ocsvm_dict)
         self.cascade = SubConfig(**cascade_dict)
-        
+
         # Build flattened dictionary params for the main cascade models
         self.iforest_params = {
             "n_estimators": self.iforest.n_estimators[0],
@@ -99,7 +99,7 @@ class ConfigLoader:
             self.config_dir = os.path.join(base_dir, "configs")
         else:
             self.config_dir = config_dir
-            
+
         self.data_config = self._load_yaml("data_config.yaml")
         self.model_config = self._load_yaml("model_config.yaml")
         self.risk_config = self._load_yaml("risk_config.yaml")
@@ -174,21 +174,21 @@ class ConfigLoader:
         params = self.model_config.get("isolation_forest") or self.model_config.get("iforest", {})
         if not params or not isinstance(params, dict):
             return {"n_estimators": 100, "max_samples": "auto", "contamination": 0.05, "random_state": 42}
-        return params
+        return {k: (v[0] if isinstance(v, list) and len(v) > 0 else v) for k, v in params.items()}
 
     @property
     def ocsvm_params(self) -> Dict[str, Any]:
         params = self.model_config.get("one_class_svm") or self.model_config.get("ocsvm", {})
         if not params or not isinstance(params, dict):
             return {"kernel": "rbf", "nu": 0.05, "gamma": "scale"}
-        return params
+        return {k: (v[0] if isinstance(v, list) and len(v) > 0 else v) for k, v in params.items()}
 
     @property
     def cascade_params(self) -> Dict[str, Any]:
         params = self.model_config.get("cascade", {})
         if not params or not isinstance(params, dict):
             return {"iforest_anomaly_threshold": -0.6, "iforest_normal_threshold": -0.45, "threshold_percentile": 80, "model_version": "cascade-v1.0"}
-        return params
+        return {k: (v[0] if isinstance(v, list) and len(v) > 0 else v) for k, v in params.items()}
 
     @property
     def grid_search_params(self) -> Dict[str, Any]:
@@ -214,7 +214,24 @@ class ConfigLoader:
             "max_bytes": 10485760,
             "backup_count": 5
         }
-        
+
+    @property
+    def data(self) -> DataConfig:
+        return DataConfig(
+            train_ratio=self.train_ratio,
+            test_ratio=self.test_ratio,
+            time_window_minutes=self.time_window_minutes
+        )
+
+    @property
+    def model(self) -> ModelConfig:
+        return ModelConfig(
+            model_store_path=self.model_store_path,
+            iforest_params=self.iforest_params,
+            ocsvm_params=self.ocsvm_params,
+            cascade_params=self.cascade_params
+        )
+
 # Global singleton configuration loader
 try:
     config = ConfigLoader()
