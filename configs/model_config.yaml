@@ -1,0 +1,37 @@
+# ============================================================================
+# file: model_config.yaml
+# Description: Configuration for Isolation Forest, OCSVM, and Cascade Model
+# ============================================================================
+
+# Default hyperparameters for Isolation Forest
+isolation_forest:
+  n_estimators: 100
+  max_samples: "auto"
+  contamination: 0.05
+  random_state: 42
+
+# Default hyperparameters for One-Class SVM
+one_class_svm:
+  kernel: "rbf"
+  nu: 0.05
+  gamma: "scale"
+
+# Cascade Model configuration
+cascade:
+  iforest_anomaly_threshold: -0.6
+  iforest_normal_threshold: -0.45
+  threshold_percentile: 80
+  model_version: "cascade-v1.0"
+
+# Hyperparameter search grids (used during grid search tuning)
+grid_search:
+  iforest:
+    n_estimators: [100, 200, 300]
+    max_samples: [0.5, 0.8, 1.0]
+    contamination: [0.05, 0.1, 0.15, 0.2]
+  ocsvm:
+    kernel: ["rbf", "poly", "sigmoid"]
+    nu: [0.05, 0.1, 0.2]
+    gamma: ["scale", "auto"]
+
+model_store_path: "models_store"

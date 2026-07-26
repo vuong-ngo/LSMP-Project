@@ -1,0 +1,19 @@
+# ============================================================================
+# file: risk_config.yaml
+# Description: Configuration for Risk Score
+# ============================================================================
+
+# alpha: 0.6 (60% weight for anomaly)
+# beta: 0.4 (40% weight for severity)
+# Risk score formula: RiskScore = 100 * [alpha * norm_anomaly + beta * norm_severity]
+risk_scoring:
+  alpha: 0.6
+  beta: 0.4
+  max_wazuh_level: 15.0
+
+# Risk classification thresholds (score range 0-100)
+classification:
+  low_threshold: 25.0
+  medium_threshold: 50.0
+  high_threshold: 80.0
+  critical_threshold: 100.0
