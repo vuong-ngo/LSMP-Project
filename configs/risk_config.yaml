@@ -16,4 +16,4 @@ classification:
   low_threshold: 25.0
   medium_threshold: 50.0
   high_threshold: 80.0
-  critical_threshold: 85.0
+  critical_threshold: 100.0
