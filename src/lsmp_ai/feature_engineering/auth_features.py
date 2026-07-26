@@ -33,7 +33,8 @@ def calculate_login_fail_count(df: pd.DataFrame) -> pd.Series:
         return pd.Series(dtype=float)
     col = _get_raw_text_col(df)
     if col not in df.columns:
-        return pd.Series(0.0, index=df['src_ip'].unique())
+        idx = df['src_ip'].unique() if 'src_ip' in df.columns else []
+        return pd.Series(0.0, index=idx)
 
     is_fail = df[col].astype(str).str.contains('Failed|invalid|auth|failure', case=False, na=False)
     return df[is_fail].groupby('src_ip').size()
@@ -52,7 +53,8 @@ def calculate_unique_failed_ip_count(df: pd.DataFrame) -> pd.Series:
         return pd.Series(dtype=float)
     col = _get_raw_text_col(df)
     if col not in df.columns:
-        return pd.Series(0.0, index=df['src_ip'].unique())
+        idx = df['src_ip'].unique() if 'src_ip' in df.columns else []
+        return pd.Series(0.0, index=idx)
 
     is_fail = df[col].astype(str).str.contains('Failed|invalid|auth|failure', case=False, na=False)
     failed_df = df[is_fail]
