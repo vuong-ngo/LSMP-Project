@@ -12,7 +12,7 @@ import time
 import re
 import logging
 import redis
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import create_engine, text
 
 # Setup logging
@@ -123,7 +123,7 @@ def parse_wazuh_alert(raw_data: str) -> dict:
             rule_id = None
 
         # 5. Extract timestamp
-        timestamp_str = alert.get("timestamp", datetime.utcnow().isoformat())
+        timestamp_str = alert.get("timestamp", datetime.now(timezone.utc).isoformat())
 
         return {
             "event_id": str(uuid.uuid4()),
@@ -174,6 +174,28 @@ def main():
     message_ids = []
     last_flush_time = time.time()
     
+    # Recover any pending messages (PEL) left unacknowledged from previous crashes
+    try:
+        pending_streams = r.xreadgroup(CONSUMER_GROUP, CONSUMER_NAME, {STREAM_KEY: "0"}, count=BATCH_SIZE)
+        if pending_streams:
+            logger.info("Recovering pending unacknowledged messages from Redis PEL...")
+            for stream, messages in pending_streams:
+                for msg_id, payload in messages:
+                    raw_data = payload.get(b"data") or list(payload.values())[0]
+                    parsed = parse_wazuh_alert(raw_data.decode("utf-8"))
+                    if parsed:
+                        batch.append(parsed)
+                    message_ids.append(msg_id)
+            if batch:
+                if write_to_postgres(engine, batch):
+                    for msg_id in message_ids:
+                        r.xack(STREAM_KEY, CONSUMER_GROUP, msg_id)
+                    logger.info(f"Recovered and acknowledged {len(message_ids)} pending messages.")
+                    batch = []
+                    message_ids = []
+    except Exception as e:
+        logger.warning(f"Pending message recovery check encounter exception: {e}")
+
     while True:
         try:
             # Read from group: '>' means only new messages that haven't been delivered to other consumers
@@ -191,8 +213,8 @@ def main():
                         message_ids.append(msg_id)
             
             now = time.time()
-            # Flush if batch limit is reached, or if timeout has elapsed
-            if len(batch) >= BATCH_SIZE or (len(batch) > 0 and (now - last_flush_time) >= BATCH_TIMEOUT):
+            # Flush if batch limit is reached, or if timeout has elapsed with accumulated message IDs
+            if len(batch) >= BATCH_SIZE or (len(message_ids) > 0 and (now - last_flush_time) >= BATCH_TIMEOUT):
                 success = write_to_postgres(engine, batch)
                 if success:
                     # Acknowledge processed messages in Redis

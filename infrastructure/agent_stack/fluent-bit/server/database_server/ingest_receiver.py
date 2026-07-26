@@ -62,22 +62,32 @@ class IngestHandler(BaseHTTPRequestHandler):
             return
 
         accepted, failed = 0, 0
-        for line in body.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                json.loads(line)
-                redis_client.xadd(
-                    STREAM_KEY,
-                    {"data": line},
-                    maxlen=STREAM_MAXLEN,
-                    approximate=True,
-                )
-                accepted += 1
-            except Exception as e:
-                failed += 1
-                logger.warning(f"Skipped invalid record: {e}")
+        lines = [line.strip() for line in body.splitlines() if line.strip()]
+        
+        if lines:
+            pipe = redis_client.pipeline()
+            for line in lines:
+                try:
+                    json.loads(line)
+                    pipe.xadd(
+                        STREAM_KEY,
+                        {"data": line},
+                        maxlen=STREAM_MAXLEN,
+                        approximate=True,
+                    )
+                    accepted += 1
+                except Exception as e:
+                    failed += 1
+                    logger.warning(f"Skipped invalid record: {e}")
+            
+            if accepted > 0:
+                try:
+                    pipe.execute()
+                except Exception as e:
+                    logger.error(f"Redis pipeline execution failed: {e}")
+                    self.send_response(500)
+                    self.end_headers()
+                    return
 
         logger.info(f"Pushed {accepted} records into Redis Stream '{STREAM_KEY}' ({failed} rejected)")
 
