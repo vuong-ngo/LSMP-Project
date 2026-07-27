@@ -42,7 +42,7 @@ def init_db_and_redis():
     """Initializes Redis stream consumer group and PostgreSQL database connection."""
     logger.info(f"Connecting to Redis at {REDIS_HOST}:{REDIS_PORT}")
     r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD)
-    
+
     # Create consumer group if not exists
     try:
         r.xgroup_create(STREAM_KEY, CONSUMER_GROUP, id="0", mkstream=True)
@@ -68,62 +68,84 @@ def init_db_and_redis():
     return r, engine
 
 def parse_wazuh_alert(raw_data: str) -> dict:
-    """Parses raw Wazuh alert JSON and maps it to log_event schema fields."""
+    """Parses raw Wazuh 4.x alert JSON and maps it to log_event schema fields accurately."""
     try:
-        alert = json.loads(raw_data)
-        
-        # 1. Extract and validate source_ip (INET type constraint)
+        if isinstance(raw_data, bytes):
+            raw_data = raw_data.decode("utf-8")
+        alert = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
+
+        # 1. Extract and validate source_ip (INET / VARCHAR(45) constraint)
         src_ip = (
-            alert.get("data", {}).get("srcip") or 
-            alert.get("data", {}).get("src_ip") or 
-            alert.get("data", {}).get("dstip")
+            alert.get("data", {}).get("srcip") or
+            alert.get("data", {}).get("src_ip") or
+            alert.get("data", {}).get("dstip") or
+            alert.get("agent", {}).get("ip")
         )
-        if not src_ip and "agent" in alert:
-            src_ip = alert.get("agent", {}).get("ip")
-            
-        if src_ip == "any" or not src_ip:
-            src_ip = None
+
+        if src_ip in ["any", "127.0.0.1", "localhost", None] or not src_ip:
+            # Fallback to agent IP if srcip is local/any
+            agent_ip = alert.get("agent", {}).get("ip")
+            if agent_ip and agent_ip != "127.0.0.1":
+                src_ip = agent_ip
+            else:
+                src_ip = None
         else:
-            # Strip potential whitespace
             src_ip = str(src_ip).strip()
-            # Validate IP format to prevent INET syntax errors
             if not IP_PATTERN.match(src_ip):
-                logger.warning(f"Invalid IP format '{src_ip}' detected, setting to NULL.")
                 src_ip = None
 
         # 2. Extract username
         username = (
-            alert.get("data", {}).get("dstuser") or 
-            alert.get("data", {}).get("srcuser") or 
-            alert.get("data", {}).get("systemuser")
+            alert.get("data", {}).get("dstuser") or
+            alert.get("data", {}).get("srcuser") or
+            alert.get("data", {}).get("systemuser") or
+            alert.get("data", {}).get("user")
         )
         if username:
-            username = str(username)[:100] # Truncate to match VARCHAR(100)
+            username = str(username)[:100]
 
-        # 3. Determine event_type based on location path
+        # 3. Extract source_host
+        source_host = (
+            alert.get("agent", {}).get("name") or
+            alert.get("agent", {}).get("hostname") or
+            alert.get("data", {}).get("src_host") or
+            alert.get("data", {}).get("hostname") or
+            alert.get("predecoder", {}).get("hostname") or
+            "wazuh-manager"
+        )
+        if source_host:
+            source_host = str(source_host)[:100]
+
+        # 4. Determine event_type (Strictly match schema.sql CHECK constraint: IN ('auth', 'nginx'))
         location = alert.get("location", "").lower()
-        if "auth" in location or "secure" in location or "pam" in location:
-            event_type = "auth"
-        elif "nginx" in location or "apache" in location or "web" in location:
+        full_log_str = str(alert.get("full_log") or alert.get("log") or alert.get("message") or "").lower()
+
+        if any(k in location or k in full_log_str for k in ["nginx", "apache", "web", "http"]):
             event_type = "nginx"
         else:
-            event_type = "auth" # Default fallback
+            event_type = "auth"  # Default to 'auth' to pass PostgreSQL CHECK (event_type IN ('auth', 'nginx'))
 
-        # 4. Extract rule details
-        severity = alert.get("rule", {}).get("level", 0)
+        # 5. Extract rule details & clamp severity (CHECK severity BETWEEN 0 AND 16)
+        raw_sev = alert.get("rule", {}).get("level", 0)
         try:
-            severity = int(severity)
+            severity = int(raw_sev)
         except (ValueError, TypeError):
             severity = 0
-            
+        severity = min(max(severity, 0), 16)  # Clamp between 0 and 16
+
         rule_id = alert.get("rule", {}).get("id")
         try:
             rule_id = int(rule_id) if rule_id else None
         except (ValueError, TypeError):
             rule_id = None
 
-        # 5. Extract timestamp
+        # 6. Extract timestamp
         timestamp_str = alert.get("timestamp", datetime.now(timezone.utc).isoformat())
+
+        # 7. Extract raw_log ensuring non-empty text
+        raw_log = alert.get("full_log") or alert.get("log") or alert.get("message") or json.dumps(alert.get("data", {}))
+        if not raw_log or raw_log == "{}":
+            raw_log = json.dumps(alert)
 
         return {
             "event_id": str(uuid.uuid4()),
@@ -133,24 +155,25 @@ def parse_wazuh_alert(raw_data: str) -> dict:
             "event_type": event_type,
             "severity": severity,
             "rule_id": rule_id,
-            "raw_log": alert.get("full_log", ""),
+            "raw_log": str(raw_log),
             "parsed_json": json.dumps(alert),
-            "agent_id": alert.get("agent", {}).get("id", "000")
+            "agent_id": str(alert.get("agent", {}).get("id", "000"))[:50],
+            "source_host": source_host
         }
     except Exception as e:
-        logger.error(f"Error parsing raw Wazuh alert: {e}")
+        logger.error(f"Error parsing raw Wazuh 4.x alert: {e}")
         return None
 
 def write_to_postgres(engine, batch: list) -> bool:
-    """Executes optimized batch inserts to PostgreSQL."""
+    """Executes optimized batch inserts to PostgreSQL with row-by-row fallback."""
     if not batch:
         return True
-        
+
     query = text("""
-        INSERT INTO log_event (event_id, timestamp, source_ip, username, event_type, severity, rule_id, raw_log, parsed_json, agent_id)
-        VALUES (:event_id, :timestamp, :source_ip, :username, :event_type, :severity, :rule_id, :raw_log, :parsed_json, :agent_id)
+        INSERT INTO log_event (event_id, timestamp, source_ip, username, event_type, severity, rule_id, raw_log, parsed_json, agent_id, source_host)
+        VALUES (:event_id, :timestamp, :source_ip, :username, :event_type, :severity, :rule_id, :raw_log, :parsed_json, :agent_id, :source_host)
     """)
-    
+
     start_time = time.time()
     try:
         with engine.begin() as conn:
@@ -158,8 +181,17 @@ def write_to_postgres(engine, batch: list) -> bool:
         logger.info(f"Successfully wrote batch of {len(batch)} alerts to log_event in {time.time() - start_time:.4f}s")
         return True
     except Exception as e:
-        logger.error(f"Failed to execute batch insert into log_event: {e}")
-        return False
+        logger.warning(f"Batch insert error ({e}). Retrying row-by-row to salvage valid critical alerts...")
+        success_count = 0
+        for item in batch:
+            try:
+                with engine.begin() as conn:
+                    conn.execute(query, item)
+                success_count += 1
+            except Exception as single_err:
+                logger.error(f"Single row insert failed for rule_id {item.get('rule_id')}: {single_err}")
+        logger.info(f"Rescued {success_count}/{len(batch)} alerts row-by-row.")
+        return success_count > 0
 
 def main():
     try:
@@ -169,11 +201,11 @@ def main():
         sys.exit(1)
 
     logger.info("Wazuh Database Writer Service started successfully. Awaiting stream logs...")
-    
+
     batch = []
     message_ids = []
     last_flush_time = time.time()
-    
+
     # Recover any pending messages (PEL) left unacknowledged from previous crashes
     try:
         pending_streams = r.xreadgroup(CONSUMER_GROUP, CONSUMER_NAME, {STREAM_KEY: "0"}, count=BATCH_SIZE)
@@ -200,18 +232,18 @@ def main():
         try:
             # Read from group: '>' means only new messages that haven't been delivered to other consumers
             streams = r.xreadgroup(CONSUMER_GROUP, CONSUMER_NAME, {STREAM_KEY: ">"}, count=BATCH_SIZE, block=1000)
-            
+
             if streams:
                 for stream, messages in streams:
                     for msg_id, payload in messages:
                         # Extract payload
                         raw_data = payload.get(b"data") or list(payload.values())[0]
                         parsed = parse_wazuh_alert(raw_data.decode("utf-8"))
-                        
+
                         if parsed:
                             batch.append(parsed)
                         message_ids.append(msg_id)
-            
+
             now = time.time()
             # Flush if batch limit is reached, or if timeout has elapsed with accumulated message IDs
             if len(batch) >= BATCH_SIZE or (len(message_ids) > 0 and (now - last_flush_time) >= BATCH_TIMEOUT):
@@ -228,7 +260,7 @@ def main():
                     # If DB write fails, wait a bit before retrying, do not acknowledge Redis
                     logger.warning("PostgreSQL write failed. Batch retained. Retrying in 5 seconds...")
                     time.sleep(5)
-                    
+
         except Exception as e:
             logger.error(f"Error in main polling loop: {e}")
             time.sleep(2)
