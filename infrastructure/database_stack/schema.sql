@@ -112,7 +112,7 @@ CREATE INDEX idx_risk_class      ON risk_score (risk_class, "timestamp" DESC);
 CREATE TABLE attack_scenarios (
     id              SERIAL PRIMARY KEY,
     scenario_name   VARCHAR(100) NOT NULL,
-    attack_type     VARCHAR(50) NOT NULL CHECK (attack_type IN ('ssh_bruteforce', 'web_bruteforce')),
+    attack_type     VARCHAR(50) NOT NULL CHECK (attack_type IN ('ssh_bruteforce', 'web_bruteforce', 'ddos', 'dos', 'portscan', 'other')),
     start_time      TIMESTAMPTZ NOT NULL,
     end_time        TIMESTAMPTZ NOT NULL,
     attacker_ip     VARCHAR(45) NOT NULL,
@@ -129,8 +129,8 @@ CREATE INDEX idx_attack_scenarios_ip   ON attack_scenarios (attacker_ip);
 CREATE TABLE evaluation_metrics (
     id                           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     run_id                       VARCHAR(100) NOT NULL,      -- groups multiple rows from the same evaluation run
-    model_config                 VARCHAR(30) NOT NULL CHECK (
-        model_config IN ('wazuh_rule_only', 'iforest_only', 'ocsvm_only', 'cascade_iforest_ocsvm')
+    model_config                 VARCHAR(50) NOT NULL CHECK (
+        model_config IN ('wazuh_rule_only', 'iforest_only', 'ocsvm_only', 'cascade_iforest_ocsvm', 'cascade-v1.0')
     ),
     model_version                VARCHAR(50),                -- matches anomaly_result.model_version if applicable
     dataset_split                VARCHAR(50) NOT NULL,       -- e.g. 'test', 'lab_ssh', 'lab_web', 'cicids2017'
