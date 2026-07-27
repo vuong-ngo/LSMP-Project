@@ -10,8 +10,11 @@ networks:
 services:
   # ===== Read Service: Query Frontend (Servicediscovery-compatible) =====
   read:
-    image: grafana/loki:${LOKI_VERSION:-3.0.0}
-    command: "-config.file=/etc/loki/config.yaml -target=read"
+    image: grafana/loki:${LOKI_VERSION:-3.7.3}
+    command: "-config.file=/etc/loki/config.yaml -config.expand-env=true -target=read"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-loki}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-supersecret}
     ports:
       - 3101:3100
       - 7946
@@ -33,8 +36,11 @@ services:
 
   # ===== Write Service: Ingestion & Indexing =====
   write:
-    image: grafana/loki:${LOKI_VERSION:-3.0.0}
-    command: "-config.file=/etc/loki/config.yaml -target=write"
+    image: grafana/loki:${LOKI_VERSION:-3.7.3}
+    command: "-config.file=/etc/loki/config.yaml -config.expand-env=true -target=write"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-loki}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-supersecret}
     ports:
       - 3102:3100
       - 7946
@@ -52,9 +58,23 @@ services:
     networks:
       <<: *loki-dns
 
+  # ===== Agent Service: Grafana Alloy (Agent for log collection) =====
+  alloy:
+    image: grafana/alloy:${ALLOY_VERSION:-v1.7.1}
+    volumes:
+      - ./config/alloy-local-config.yaml:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
+    ports:
+      - 12345:12345
+    depends_on:
+      - gateway
+    networks:
+      - loki
+
   # ===== Storage Service: MinIO Object Storage =====
   minio:
-    image: minio/minio:${MINIO_VERSION:-RELEASE.2024-06-06T09-36-42Z}
+    image: minio/minio:${MINIO_VERSION:-RELEASE.2025-09-07T16-13-09Z-cpuv1}
     entrypoint:
       - sh
       - -euc
@@ -63,8 +83,8 @@ services:
         mkdir -p /data/loki-ruler && \
         minio server /data
     environment:
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-loki}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-supersecret}
       - MINIO_PROMETHEUS_AUTH_TYPE=public
       - MINIO_UPDATE=off
     ports:
@@ -81,7 +101,7 @@ services:
 
   # ===== Visualization Service: Grafana =====
   grafana:
-    image: grafana/grafana:${GRAFANA_VERSION:-11.1.0}
+    image: grafana/grafana:${GRAFANA_VERSION:-13.1.0}
     environment:
       - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
       - GF_AUTH_ANONYMOUS_ENABLED=true
@@ -118,14 +138,18 @@ services:
 
   # ===== Backend Service: Index store (Service Discovery - compatible) =====
   backend:
-    image: grafana/loki:${LOKI_VERSION:-3.0.0}
+    image: grafana/loki:${LOKI_VERSION:-3.7.3}
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-loki}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-supersecret}
     volumes:
       - ./config/loki-config.yaml:/etc/loki/config.yaml
     ports:
       - "3100"
       - "7946"
-    command: "-config.file=/etc/loki/config.yaml -target=backend -legacy-read-mode=false"
+    command: "-config.file=/etc/loki/config.yaml -config.expand-env=true -target=backend -legacy-read-mode=false"
     depends_on:
+      - minio
       - gateway
     healthcheck:
       test: [ "CMD", "/usr/bin/loki", "-health" ]
@@ -138,7 +162,7 @@ services:
 
   # ===== Ingress Service: Nginx (Loki Service Discovery) =====
   gateway:
-    image: nginx:${NGINX_VERSION:-1.27.0-alpine}
+    image: nginx:${NGINX_VERSION:-1.27.4-alpine}
     depends_on:
       - read
       - write
