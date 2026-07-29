@@ -21,7 +21,7 @@ from lsmp_ai.common.constants import LABEL_NORMAL, LABEL_ANOMALY
 class CascadeModel(BaseModel):
     """Two-stage Cascade Model combining Isolation Forest (Stage 1) and One-Class SVM (Stage 2).
 
-    Stage 1 rapidly filters out clear normal and clear anomalous samples using fast tree-based 
+    Stage 1 rapidly filters out clear normal and clear anomalous samples using fast tree-based
     partitioning. Stage 2 evaluates ambiguous samples using a precise kernel-based decision boundary.
 
     Attributes:
@@ -92,16 +92,17 @@ class CascadeModel(BaseModel):
         # Determine thresholds if percentile is given
         if self.threshold_percentile is not None:
             scores = self.iforest_model.score(X)
-            # anomaly threshold at the bottom (100 - percentile)%
-            self.anomaly_threshold = float(np.percentile(scores, 100 - self.threshold_percentile))
-            # normal threshold at percentile%
-            self.normal_threshold = float(np.percentile(scores, self.threshold_percentile))
+            # Ensure p_val is lower tail (e.g. 5-10%)
+            p_val = min(float(self.threshold_percentile), 100.0 - float(self.threshold_percentile))
+            p_val = max(1.0, p_val)
+            self.anomaly_threshold = float(np.percentile(scores, p_val))
+            self.normal_threshold = float(np.percentile(scores, 100.0 - p_val))
             logger.info(f"Set percentile thresholds: anomaly={self.anomaly_threshold:.4f}, normal={self.normal_threshold:.4f}")
 
         # Step 2: Fit One-Class SVM on normal baseline traffic
         if y is not None:
             labels = np.array(y)
-            normal_mask = (labels == LABEL_NORMAL) | (labels == 1) | (labels == '1') | (labels == 0) | (labels == '0') | (labels == 'BENIGN') | (labels == 'benign')
+            normal_mask = (labels == LABEL_NORMAL) | (labels == 0) | (labels == '0') | (labels == 'BENIGN') | (labels == 'benign')
             X_normal = X[normal_mask] if isinstance(X, pd.DataFrame) else X[normal_mask]
             if len(X_normal) > 0:
                 logger.info(f"Fitting OCSVM on {len(X_normal)} Normal samples.")
@@ -189,7 +190,8 @@ class CascadeModel(BaseModel):
             pred2_batch = self.ocsvm_model.predict(X_uncertain)
 
             stage2_scores[uncertain_mask] = score2_batch
-            anomaly_prob_batch = 1.0 / (1.0 + np.exp(score2_batch))
+            score2_clipped = np.clip(score2_batch, -50.0, 50.0)
+            anomaly_prob_batch = 1.0 / (1.0 + np.exp(score2_clipped))
             anomaly_scores[uncertain_mask] = anomaly_prob_batch
 
             labels[uncertain_mask] = np.where(pred2_batch == -1, LABEL_ANOMALY, LABEL_NORMAL)
@@ -243,9 +245,9 @@ class CascadeModel(BaseModel):
         return self
 
     def predict_with_details(
-        self, 
-        X: Union[pd.DataFrame, np.ndarray], 
-        src_ips: Optional[list] = None, 
+        self,
+        X: Union[pd.DataFrame, np.ndarray],
+        src_ips: Optional[list] = None,
         window_starts: Optional[list] = None
     ) -> pd.DataFrame:
         """Runs detailed inference and appends IP and window timestamp identifiers if provided.
