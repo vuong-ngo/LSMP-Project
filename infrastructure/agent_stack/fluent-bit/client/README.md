@@ -60,12 +60,13 @@ bash generate_keys.sh
 ```
 
 If the client machine is deployed independently on a separate remote network:
+
 1. Copy `ca.crt` generated from the Database Server into `./certs/ca.crt`.
 2. Copy `.env.example` to `.env` and fill in your central server endpoints:
 
 ```env
 # IP/port of the central Grafana Loki server
-LOKI_HOST=192.168.1.100
+LOKI_HOST=127.0.0.1
 LOKI_PORT=3100
 LOKI_USER=
 LOKI_PASSWORD=
@@ -75,7 +76,7 @@ ENABLE_TLS=On
 TLS_VERIFY=On
 
 # IP/port of the central Wazuh Manager syslog port
-WAZUH_HOST=192.168.1.50
+WAZUH_HOST=127.0.0.1
 WAZUH_PORT=514
 
 # Metadata label for this client machine
@@ -98,6 +99,7 @@ docker compose up -d --build
 #### B. Verify Container Logs
 
 Check shipping status and TLS connection:
+
 ```bash
 docker compose logs -f
 ```
