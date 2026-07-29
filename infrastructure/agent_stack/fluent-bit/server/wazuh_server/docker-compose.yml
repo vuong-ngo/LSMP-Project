@@ -15,12 +15,16 @@ services:
       - INGEST_HOST=${INGEST_HOST:-127.0.0.1}
       - INGEST_PORT=${INGEST_PORT:-8080}
       - INGEST_TOKEN=${INGEST_TOKEN}
+      - ENABLE_TLS=${ENABLE_TLS:-On}
+      - TLS_VERIFY=${TLS_VERIFY:-On}
     volumes:
       # Read-only mount of the shared Wazuh Manager logs volume
       - wazuh_logs:/var/ossec/logs:ro
       # Configuration mappings
       - ./config/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
       - ./config/parsers.conf:/fluent-bit/etc/parsers.conf:ro
+      # TLS Certificates mount
+      - ./certs:/fluent-bit/certs:ro
       # Persistent volume to store file tail offsets (avoids duplicates on restart)
       - fluent_bit_db:/fluent-bit/db/
 
