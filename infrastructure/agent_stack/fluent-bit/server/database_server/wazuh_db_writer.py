@@ -42,7 +42,7 @@ def init_db_and_redis():
     """Initializes Redis stream consumer group and PostgreSQL database connection."""
     logger.info(f"Connecting to Redis at {REDIS_HOST}:{REDIS_PORT}")
     r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD)
-
+    
     # Create consumer group if not exists
     try:
         r.xgroup_create(STREAM_KEY, CONSUMER_GROUP, id="0", mkstream=True)
@@ -73,15 +73,15 @@ def parse_wazuh_alert(raw_data: str) -> dict:
         if isinstance(raw_data, bytes):
             raw_data = raw_data.decode("utf-8")
         alert = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
-
+        
         # 1. Extract and validate source_ip (INET / VARCHAR(45) constraint)
         src_ip = (
-            alert.get("data", {}).get("srcip") or
-            alert.get("data", {}).get("src_ip") or
+            alert.get("data", {}).get("srcip") or 
+            alert.get("data", {}).get("src_ip") or 
             alert.get("data", {}).get("dstip") or
             alert.get("agent", {}).get("ip")
         )
-
+            
         if src_ip in ["any", "127.0.0.1", "localhost", None] or not src_ip:
             # Fallback to agent IP if srcip is local/any
             agent_ip = alert.get("agent", {}).get("ip")
@@ -96,8 +96,8 @@ def parse_wazuh_alert(raw_data: str) -> dict:
 
         # 2. Extract username
         username = (
-            alert.get("data", {}).get("dstuser") or
-            alert.get("data", {}).get("srcuser") or
+            alert.get("data", {}).get("dstuser") or 
+            alert.get("data", {}).get("srcuser") or 
             alert.get("data", {}).get("systemuser") or
             alert.get("data", {}).get("user")
         )
@@ -106,9 +106,9 @@ def parse_wazuh_alert(raw_data: str) -> dict:
 
         # 3. Extract source_host
         source_host = (
-            alert.get("agent", {}).get("name") or
-            alert.get("agent", {}).get("hostname") or
-            alert.get("data", {}).get("src_host") or
+            alert.get("agent", {}).get("name") or 
+            alert.get("agent", {}).get("hostname") or 
+            alert.get("data", {}).get("src_host") or 
             alert.get("data", {}).get("hostname") or
             alert.get("predecoder", {}).get("hostname") or
             "wazuh-manager"
@@ -119,7 +119,7 @@ def parse_wazuh_alert(raw_data: str) -> dict:
         # 4. Determine event_type (Strictly match schema.sql CHECK constraint: IN ('auth', 'nginx'))
         location = alert.get("location", "").lower()
         full_log_str = str(alert.get("full_log") or alert.get("log") or alert.get("message") or "").lower()
-
+        
         if any(k in location or k in full_log_str for k in ["nginx", "apache", "web", "http"]):
             event_type = "nginx"
         else:
@@ -132,7 +132,7 @@ def parse_wazuh_alert(raw_data: str) -> dict:
         except (ValueError, TypeError):
             severity = 0
         severity = min(max(severity, 0), 16)  # Clamp between 0 and 16
-
+            
         rule_id = alert.get("rule", {}).get("id")
         try:
             rule_id = int(rule_id) if rule_id else None
@@ -168,12 +168,12 @@ def write_to_postgres(engine, batch: list) -> bool:
     """Executes optimized batch inserts to PostgreSQL with row-by-row fallback."""
     if not batch:
         return True
-
+        
     query = text("""
         INSERT INTO log_event (event_id, timestamp, source_ip, username, event_type, severity, rule_id, raw_log, parsed_json, agent_id, source_host)
         VALUES (:event_id, :timestamp, :source_ip, :username, :event_type, :severity, :rule_id, :raw_log, :parsed_json, :agent_id, :source_host)
     """)
-
+    
     start_time = time.time()
     try:
         with engine.begin() as conn:
@@ -201,11 +201,11 @@ def main():
         sys.exit(1)
 
     logger.info("Wazuh Database Writer Service started successfully. Awaiting stream logs...")
-
+    
     batch = []
     message_ids = []
     last_flush_time = time.time()
-
+    
     # Recover any pending messages (PEL) left unacknowledged from previous crashes
     try:
         pending_streams = r.xreadgroup(CONSUMER_GROUP, CONSUMER_NAME, {STREAM_KEY: "0"}, count=BATCH_SIZE)
@@ -232,18 +232,18 @@ def main():
         try:
             # Read from group: '>' means only new messages that haven't been delivered to other consumers
             streams = r.xreadgroup(CONSUMER_GROUP, CONSUMER_NAME, {STREAM_KEY: ">"}, count=BATCH_SIZE, block=1000)
-
+            
             if streams:
                 for stream, messages in streams:
                     for msg_id, payload in messages:
                         # Extract payload
                         raw_data = payload.get(b"data") or list(payload.values())[0]
                         parsed = parse_wazuh_alert(raw_data.decode("utf-8"))
-
+                        
                         if parsed:
                             batch.append(parsed)
                         message_ids.append(msg_id)
-
+            
             now = time.time()
             # Flush if batch limit is reached, or if timeout has elapsed with accumulated message IDs
             if len(batch) >= BATCH_SIZE or (len(message_ids) > 0 and (now - last_flush_time) >= BATCH_TIMEOUT):
@@ -260,7 +260,7 @@ def main():
                     # If DB write fails, wait a bit before retrying, do not acknowledge Redis
                     logger.warning("PostgreSQL write failed. Batch retained. Retrying in 5 seconds...")
                     time.sleep(5)
-
+                    
         except Exception as e:
             logger.error(f"Error in main polling loop: {e}")
             time.sleep(2)
