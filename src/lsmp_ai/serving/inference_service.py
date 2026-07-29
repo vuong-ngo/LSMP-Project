@@ -52,7 +52,7 @@ class InferenceService:
             return pd.DataFrame()
 
         # Check required feature columns
-        feat_cols = config.features if (config and hasattr(config, "features") and config.features) else FEATURE_COLUMNS
+        feat_cols = config.features if (config and hasattr(config, "features") and config.features) else list(FEATURE_COLUMNS)
         missing = [c for c in feat_cols if c not in features_df.columns]
         if missing:
             raise ValueError(f"Missing feature columns: {missing}")
