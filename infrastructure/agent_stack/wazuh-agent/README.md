@@ -61,7 +61,7 @@ AGENT_GROUP=default
 Start the Wazuh Agent container:
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
 
 ### 3. Verification
