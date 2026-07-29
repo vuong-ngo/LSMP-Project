@@ -1,0 +1,17 @@
+# ============================================================================
+# file: docker-compose.yml
+# Description: Docker Compose configuration for Wazuh agent.
+# ============================================================================
+
+# Wazuh App Copyright (C) 2017, Wazuh Inc. (License GPLv2)
+services:
+  wazuh.agent:
+    image: wazuh/wazuh-agent:4.14.6
+    restart: always
+    environment:
+      - WAZUH_MANAGER_IP=${WAZUH_MANAGER_IP}
+      - WAZUH_MANAGER_PORT=${WAZUH_MANAGER_PORT}
+      - AGENT_NAME=${AGENT_NAME}
+      - AGENT_GROUP=${AGENT_GROUP}
+    volumes:
+      - ./config/wazuh-agent-conf:/wazuh-config-mount/etc/ossec.conf
