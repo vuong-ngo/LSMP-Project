@@ -41,6 +41,11 @@ services:
       - STREAM_MAXLEN=100000
       - LISTEN_PORT=8080
       - INGEST_TOKEN=${INGEST_TOKEN}
+      - USE_TLS=${USE_TLS:-true}
+      - SSL_CERT_FILE=/etc/ssl/certs/lsmp_ingest.crt
+      - SSL_KEY_FILE=/etc/ssl/certs/lsmp_ingest.key
+    volumes:
+      - ./certs:/etc/ssl/certs:ro
     depends_on:
       lsmp-redis:
         condition: service_healthy

@@ -6,6 +6,7 @@
 import os
 import sys
 import json
+import ssl
 import logging
 import redis
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -24,6 +25,12 @@ STREAM_KEY     = os.getenv("STREAM_KEY", "wazuh_stream")
 STREAM_MAXLEN  = int(os.getenv("STREAM_MAXLEN", 100000))
 LISTEN_PORT    = int(os.getenv("LISTEN_PORT", 8080))
 INGEST_TOKEN   = os.getenv("INGEST_TOKEN")  # Required, no default value
+
+# TLS / HTTPS Configuration
+USE_TLS        = os.getenv("USE_TLS", "false").lower() in ("true", "1", "yes")
+SSL_CERT_FILE  = os.getenv("SSL_CERT_FILE", "/etc/ssl/certs/lsmp_ingest.crt")
+SSL_KEY_FILE   = os.getenv("SSL_KEY_FILE", "/etc/ssl/certs/lsmp_ingest.key")
+MAX_BODY_SIZE  = int(os.getenv("MAX_BODY_SIZE", 10 * 1024 * 1024))  # Default 10 MB payload limit
 
 if not INGEST_TOKEN:
     logger.critical("INGEST_TOKEN is not set - refusing to start (to avoid exposing unauthenticated endpoints to the network).")
@@ -54,6 +61,11 @@ class IngestHandler(BaseHTTPRequestHandler):
 
         try:
             length = int(self.headers.get("Content-Length", 0))
+            if length > MAX_BODY_SIZE:
+                logger.warning(f"Rejected oversized request ({length} bytes > limit {MAX_BODY_SIZE} bytes) from {self.address_string()}")
+                self.send_response(413)  # Payload Too Large
+                self.end_headers()
+                return
             body = self.rfile.read(length).decode("utf-8", errors="replace")
         except Exception as e:
             logger.error(f"Failed to read request body: {e}")
@@ -108,9 +120,21 @@ def main():
         sys.exit(1)
 
     server = ThreadingHTTPServer(("0.0.0.0", LISTEN_PORT), IngestHandler)
-    logger.info(f"LSMP Ingest Receiver listening at 0.0.0.0:{LISTEN_PORT}/ingest")
+    
+    if USE_TLS:
+        if not os.path.exists(SSL_CERT_FILE) or not os.path.exists(SSL_KEY_FILE):
+            logger.critical(f"TLS enabled but certificate files not found: cert='{SSL_CERT_FILE}', key='{SSL_KEY_FILE}'")
+            sys.exit(1)
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(certfile=SSL_CERT_FILE, keyfile=SSL_KEY_FILE)
+        server.socket = ctx.wrap_socket(server.socket, server_side=True)
+        logger.info(f"LSMP Ingest Receiver listening securely (HTTPS/TLS) at https://0.0.0.0:{LISTEN_PORT}/ingest")
+    else:
+        logger.info(f"LSMP Ingest Receiver listening at http://0.0.0.0:{LISTEN_PORT}/ingest (HTTP - Plaintext)")
+        
     server.serve_forever()
 
 
 if __name__ == "__main__":
     main()
+
