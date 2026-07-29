@@ -20,7 +20,7 @@ one_class_svm:
 cascade:
   iforest_anomaly_threshold: -0.6
   iforest_normal_threshold: -0.45
-  threshold_percentile: 80
+  threshold_percentile: 15
   model_version: "cascade-v1.0"
 
 # Hyperparameter search grids (used during grid search tuning)

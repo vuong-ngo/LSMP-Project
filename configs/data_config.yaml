@@ -1,11 +1,10 @@
 # ============================================================================
 # file: data_config.yaml
-# Description: Configuration for Data
+# Description: Configuration for Data Processing & 14 LSMP Feature Vectors
 # ============================================================================
 
-# This file contains the configuration for data processing and feature engineering.
 data:
-  # Feature columns used by the AI model (14 features)
+  # 14 LSMP Feature columns used by the AI model
   features:
     - login_fail_count
     - unique_failed_ip_count
