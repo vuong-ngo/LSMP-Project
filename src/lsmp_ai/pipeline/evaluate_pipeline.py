@@ -5,6 +5,7 @@
 
 # ===== IMPORT MODULES =====
 import os
+import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
@@ -48,10 +49,38 @@ class EvaluatePipeline:
         X = df[FEATURE_COLUMNS].values
         y = self.data_loader.prepare_labels(df["label"])
 
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y,
-            test_size=(1 - self.data_config.train_ratio),
-            random_state=42,
+        # One-Class split: Train = Pure Benign, Test = remaining Benign + all Anomaly
+        from lsmp_ai.common.constants import LABEL_NORMAL, LABEL_ANOMALY
+        y_arr = np.asarray(y)
+        normal_mask = (y_arr == 0)  # 0 = Normal after prepare_labels
+        anomaly_mask = (y_arr == 1)  # 1 = Anomaly
+
+        if normal_mask.any() and anomaly_mask.any():
+            X_normal = X[normal_mask]
+            y_normal = y_arr[normal_mask]
+            X_anomaly = X[anomaly_mask]
+            y_anomaly = y_arr[anomaly_mask]
+
+            split_idx = int(len(X_normal) * self.data_config.train_ratio)
+            X_train = X_normal[:split_idx]
+            y_train = y_normal[:split_idx]
+            X_test = np.concatenate([X_normal[split_idx:], X_anomaly])
+            y_test = np.concatenate([y_normal[split_idx:], y_anomaly])
+        else:
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y,
+                test_size=(1 - self.data_config.train_ratio),
+                random_state=42,
+            )
+
+        # Scale features using FeaturePipeline (fit on train only to prevent data leakage)
+        from lsmp_ai.feature_engineering.feature_pipeline import FeaturePipeline
+        feat_pipeline = FeaturePipeline()
+        X_train = feat_pipeline.fit_transform(
+            pd.DataFrame(X_train, columns=FEATURE_COLUMNS)
+        )
+        X_test = feat_pipeline.transform(
+            pd.DataFrame(X_test, columns=FEATURE_COLUMNS)
         )
 
         iforest_params = {

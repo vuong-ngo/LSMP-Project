@@ -31,8 +31,8 @@ class TrainPipeline:
         data_loader: DataLoader | None = None,
         model_registry: ModelRegistry | None = None,
     ):
-        self.data_config = data_config or (config.data if config else DataConfig())
-        self.model_config = model_config or (config.model if config else ModelConfig())
+        self.data_config = data_config or (getattr(config, "data_config", None) if config else DataConfig())
+        self.model_config = model_config or (getattr(config, "model_config", None) if config else ModelConfig())
         self.data_loader = data_loader or DataLoader()
         self.model_registry = model_registry or ModelRegistry(
             registry_dir=getattr(self.model_config, "model_store_path", None)
@@ -60,6 +60,14 @@ class TrainPipeline:
                 os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
                 "data", "processed", "dataset.csv"
             )
+            if not os.path.exists(fallback_path):
+                logger.info("Processed dataset not found. Triggering automated CICIDS2017 dataset preparation...")
+                try:
+                    from scripts.prepare_cicids2017 import prepare_cicids2017_dataset
+                    prepare_cicids2017_dataset()
+                except Exception as prep_err:
+                    logger.warning(f"Could not prepare CICIDS2017 dataset: {prep_err}")
+
             if os.path.exists(fallback_path):
                 df_raw = self.data_loader.load_from_csv(fallback_path)
             else:
@@ -75,16 +83,33 @@ class TrainPipeline:
             for col in missing_feats:
                 df_raw[col] = 0.0
 
-        min_class_count = df_raw['label'].value_counts().min() if 'label' in df_raw.columns else 0
-        use_stratify = df_raw['label'] if (len(df_raw['label'].unique()) > 1 and min_class_count >= 2) else None
-        
+        total_samples = len(df_raw)
+        normal_count = int((df_raw['label'] == LABEL_NORMAL).sum())
+        anomaly_count = int((df_raw['label'] == LABEL_ANOMALY).sum())
+
+        # One-Class Split: Train = 100% Pure BENIGN, Test = remaining BENIGN + ALL Anomaly
+        # This is critical for unsupervised anomaly detection models (IForest/OCSVM)
         test_ratio = 1.0 - getattr(self.data_config, "train_ratio", 0.7)
-        train_df, test_df = train_test_split(
-            df_raw,
-            test_size=test_ratio,
-            random_state=42,
-            stratify=use_stratify
-        )
+        df_normal = df_raw[df_raw['label'] == LABEL_NORMAL]
+        df_anomaly = df_raw[df_raw['label'] == LABEL_ANOMALY]
+
+        if not df_normal.empty and not df_anomaly.empty:
+            df_normal_train, df_normal_test = train_test_split(
+                df_normal, test_size=test_ratio, random_state=42
+            )
+            train_df = df_normal_train.reset_index(drop=True)
+            test_df = pd.concat(
+                [df_normal_test, df_anomaly], ignore_index=True
+            ).sample(frac=1.0, random_state=42).reset_index(drop=True)
+            logger.info(
+                f"One-Class Split: Train={len(train_df)} (100% Normal), "
+                f"Test={len(test_df)} (Normal: {len(df_normal_test)}, Anomaly: {len(df_anomaly)})"
+            )
+        else:
+            # Fallback: if only one class exists, use standard split
+            train_df, test_df = train_test_split(
+                df_raw, test_size=test_ratio, random_state=42
+            )
 
         feat_pipeline = FeaturePipeline()
         X_train_scaled = feat_pipeline.fit_transform(train_df)
@@ -92,10 +117,12 @@ class TrainPipeline:
         cascade_params = config.cascade_params if (config and hasattr(config, "cascade_params")) else {}
         cascade_params["model_version"] = model_version
         
-        cascade_model = CascadeModel(cascade_params=cascade_params)
+        thresh_pct = cascade_params.get("threshold_percentile", 15.0)
+        cascade_model = CascadeModel(threshold_percentile=thresh_pct, cascade_params=cascade_params)
         cascade_model.fit(X_train_scaled, train_df['label'].values)
 
         metrics = {}
+        confusion = {"tp": 0, "fp": 0, "tn": 0, "fn": 0}
         if len(test_df['label'].unique()) > 1:
             X_test_scaled = feat_pipeline.transform(test_df)
             preds = cascade_model.predict(X_test_scaled)
@@ -109,12 +136,60 @@ class TrainPipeline:
                 auc = roc_auc_score(y_true, scores)
             except Exception:
                 auc = 0.5
-            metrics = {"precision": float(precision), "recall": float(recall), "f1_score": float(f1), "roc_auc": float(auc)}
+
+            accuracy = float((y_true == y_pred).mean())
+            tp = int(((y_true == 1) & (y_pred == 1)).sum())
+            fp = int(((y_true == 0) & (y_pred == 1)).sum())
+            tn = int(((y_true == 0) & (y_pred == 0)).sum())
+            fn = int(((y_true == 1) & (y_pred == 0)).sum())
+            fpr = float(fp / (fp + tn)) if (fp + tn) > 0 else 0.0
+
+            metrics = {
+                "accuracy": accuracy,
+                "precision": float(precision),
+                "recall": float(recall),
+                "f1_score": float(f1),
+                "roc_auc": float(auc),
+                "false_positive_rate": fpr,
+            }
+            confusion = {"tp": tp, "fp": fp, "tn": tn, "fn": fn}
 
         version = self.model_registry.register_model(cascade_model, metrics=metrics)
         pipeline_path = os.path.join(self.model_registry.registry_dir, version, "feature_pipeline.joblib")
         feat_pipeline.save(pipeline_path)
         logger.info(f"Saved feature pipeline binary to {pipeline_path}")
+
+        # Persist metrics to evaluation_metrics database table if DB available
+        if metrics:
+            try:
+                db_client = DBClient()
+                db_client.write_evaluation_metrics(
+                    run_id=f"train_{version}",
+                    model_config_name="cascade_iforest_ocsvm",
+                    dataset_split="cicids2017",
+                    precision=metrics.get("precision", 0.0),
+                    recall=metrics.get("recall", 0.0),
+                    f1=metrics.get("f1_score", 0.0),
+                    fpr=metrics.get("false_positive_rate", 0.0),
+                    roc_auc=metrics.get("roc_auc", 0.5),
+                    hyperparameters=getattr(cascade_model, "cascade_params", cascade_params),
+                    model_version=version
+                )
+            except Exception as eval_err:
+                logger.warning(f"Could not persist evaluation metrics to DB: {eval_err}")
+
+        self.last_run_summary = {
+            "version": version,
+            "total_samples": total_samples,
+            "train_samples": len(train_df),
+            "test_samples": len(test_df),
+            "normal_count": normal_count,
+            "anomaly_count": anomaly_count,
+            "metrics": metrics,
+            "confusion_matrix": confusion,
+            "cascade_params": getattr(cascade_model, "cascade_params", cascade_params),
+            "model_path": os.path.join(self.model_registry.registry_dir, version),
+        }
         return version
 
 
