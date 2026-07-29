@@ -1,26 +1,36 @@
 # ============================================================================
-# file: common/config_loader.py
-# Description: Load configuration files for LSMP AI module.
+# file: src/lsmp_ai/common/config_loader.py
+# Description: Null-Safe Configuration Loader for LSMP AI Module.
+#              Guarantees fallback defaults to prevent null config exceptions.
 # ============================================================================
 
 # ===== Import modules =====
 import os
 import yaml
-from typing import Any, Dict, List
-from lsmp_ai.common.exceptions import ConfigurationError
-from lsmp_ai.common.logger import logger
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+try:
+    from dotenv import load_dotenv
+    _env_path = Path(__file__).resolve().parent.parent.parent.parent / ".env"
+    if _env_path.exists():
+        load_dotenv(dotenv_path=_env_path)
+    else:
+        load_dotenv()
+except ImportError:
+    pass
 
-# ===== Data Configuration =====
+from lsmp_ai.common.logger import logger
+from lsmp_ai.common.constants import FEATURE_COLUMNS
+
+
+# ===== Data Configuration Object =====
 class DataConfig:
-    def __init__(self, train_ratio: float = 0.7, test_ratio: float = 0.3, time_window_minutes: int = 1):
+    def __init__(self, train_ratio: float = 0.7, test_ratio: float = 0.3, time_window_minutes: int = 1, features: Optional[List[str]] = None):
         self.train_ratio = train_ratio
         self.test_ratio = test_ratio
         self.time_window_minutes = time_window_minutes
-        self.features = [
-            "login_fail_count", "unique_failed_ip_count", "fail_success_ratio", "ip_entropy", "hour_of_day",
-            "request_rate", "status_4xx_rate", "url_frequency", "user_agent_entropy", "method_distribution",
-            "time_window_count", "burst_rate", "sliding_window_count", "ip_switch_frequency"
-        ]
+        self.features = features or list(FEATURE_COLUMNS)
+
 
 # ===== Sub-Configuration =====
 class SubConfig:
@@ -28,12 +38,12 @@ class SubConfig:
         for k, v in kwargs.items():
             setattr(self, k, v)
 
-# ===== Model Configuration =====
+
+# ===== Model Configuration Object =====
 class ModelConfig:
     def __init__(self, model_store_path: str = None, iforest_params: dict = None, ocsvm_params: dict = None, cascade_params: dict = None):
         self.model_store_path = model_store_path or os.getenv("MODEL_DIR", "models_store")
 
-        # Determine parameters
         iforest_dict = {
             "n_estimators": [100],
             "max_samples": ["auto"],
@@ -55,13 +65,11 @@ class ModelConfig:
             "iforest_anomaly_threshold": -0.6,
             "iforest_normal_threshold": -0.45,
             "threshold_percentile": 80,
-            "model_version": "cascade-v1.0"
+            "model_version": "cascade-v2.0-clean"
         }
         if cascade_params:
             cascade_dict.update(cascade_params)
 
-
-        # Standardize parameter dictionary values to list for index subscript compatibility [0]
         for d in [iforest_dict, ocsvm_dict, cascade_dict]:
             for k, v in d.items():
                 if not isinstance(v, list):
@@ -71,7 +79,6 @@ class ModelConfig:
         self.ocsvm = SubConfig(**ocsvm_dict)
         self.cascade = SubConfig(**cascade_dict)
 
-        # Build flattened dictionary params for the main cascade models
         self.iforest_params = {
             "n_estimators": self.iforest.n_estimators[0],
             "max_samples": self.iforest.max_samples[0],
@@ -90,78 +97,82 @@ class ModelConfig:
             "model_version": self.cascade.model_version[0]
         }
 
-# ===== Configure Loader =====
+
+# ===== Configure Loader Singleton =====
 class ConfigLoader:
     def __init__(self, config_dir: str = None):
         if config_dir is None:
-            # Default directory structure: projects/LSMP-AIModel/configs
-            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-            self.config_dir = os.path.join(base_dir, "configs")
+            base_dir = Path(__file__).resolve().parent.parent.parent.parent
+            self.config_dir = str(base_dir / "configs")
         else:
             self.config_dir = config_dir
 
-        self.data_config = self._load_yaml("data_config.yaml")
-        self.model_config = self._load_yaml("model_config.yaml")
-        self.risk_config = self._load_yaml("risk_config.yaml")
-        self.logging_config = self._load_yaml("logging.yaml", optional=True)
+        self._raw_data_config = self._load_yaml("data_config.yaml")
+        self._raw_model_config = self._load_yaml("model_config.yaml")
+        self._raw_risk_config = self._load_yaml("risk_config.yaml")
+        self._raw_logging_config = self._load_yaml("logging.yaml")
 
-    def _load_yaml(self, filename: str, optional: bool = False) -> Dict[str, Any]:
+    def _load_yaml(self, filename: str) -> Dict[str, Any]:
         filepath = os.path.join(self.config_dir, filename)
         if not os.path.exists(filepath):
-            if optional:
-                logger.info(f"Optional configuration file not found, using defaults: {filepath}")
-                return {}
-            raise ConfigurationError(f"Configuration file not found: {filepath}")
+            logger.info(f"Config file not found ({filepath}), using default fallback parameters.")
+            return {}
         try:
             with open(filepath, "r") as f:
-                config = yaml.safe_load(f)
-                logger.info(f"Successfully loaded configuration: {filepath}")
-                return config or {}
+                content = yaml.safe_load(f)
+                return content if isinstance(content, dict) else {}
         except Exception as e:
-            if optional:
-                logger.warning(f"Failed to parse optional configuration {filename}: {e}. Using defaults.")
-                return {}
-            raise ConfigurationError(f"Failed to parse {filename}: {e}")
+            logger.warning(f"Could not load config file {filename}: {e}. Using fallback defaults.")
+            return {}
+
+    @property
+    def data_config(self) -> DataConfig:
+        data_section = self._raw_data_config.get("data", {})
+        feats = data_section.get("features", list(FEATURE_COLUMNS))
+        return DataConfig(
+            train_ratio=self._raw_data_config.get("train_ratio", 0.7),
+            test_ratio=self._raw_data_config.get("test_ratio", 0.3),
+            time_window_minutes=data_section.get("time_window_minutes", 1),
+            features=feats
+        )
+
+    @property
+    def model_config(self) -> ModelConfig:
+        return ModelConfig(
+            model_store_path=self._raw_model_config.get("model_store_path", "models_store"),
+            iforest_params=self._raw_model_config.get("isolation_forest"),
+            ocsvm_params=self._raw_model_config.get("one_class_svm"),
+            cascade_params=self._raw_model_config.get("cascade")
+        )
+
+    @property
+    def data(self) -> DataConfig:
+        return self.data_config
+
+    @property
+    def model(self) -> ModelConfig:
+        return self.model_config
 
     @property
     def features(self) -> List[str]:
-        return self.data_config.get("data", {}).get("features", [])
+        data_section = self._raw_data_config.get("data", {})
+        return data_section.get("features", list(FEATURE_COLUMNS))
 
     @property
     def time_window_minutes(self) -> int:
-        return self.data_config.get("data", {}).get("time_window_minutes", 1)
-
-    @property
-    def train_test_split_ratio(self) -> float:
-        return self.data_config.get("data", {}).get("train_test_split_ratio", self.data_config.get("train_ratio", 0.7))
+        return self._raw_data_config.get("data", {}).get("time_window_minutes", 1)
 
     @property
     def train_ratio(self) -> float:
-        return self.data_config.get("train_ratio", 0.7)
+        return self._raw_data_config.get("train_ratio", 0.7)
 
     @property
     def test_ratio(self) -> float:
-        return self.data_config.get("test_ratio", 0.3)
-
-    @property
-    def raw_data_path(self) -> str:
-        return self.data_config.get("raw_data_path", "data/raw")
-
-    @property
-    def processed_data_path(self) -> str:
-        return self.data_config.get("processed_data_path", "data/processed")
-
-    @property
-    def external_data_path(self) -> str:
-        return self.data_config.get("external_data_path", "data/external")
-
-    @property
-    def feature_version(self) -> str:
-        return self.data_config.get("feature_version", "v1")
+        return self._raw_data_config.get("test_ratio", 0.3)
 
     @property
     def db_tables(self) -> Dict[str, str]:
-        data_section = self.data_config.get("data", {})
+        data_section = self._raw_data_config.get("data", {})
         return {
             "wazuh_alerts": data_section.get("db_table_wazuh_alerts", "log_event"),
             "feature_vectors": data_section.get("db_table_features", "feature_vectors"),
@@ -171,70 +182,52 @@ class ConfigLoader:
 
     @property
     def iforest_params(self) -> Dict[str, Any]:
-        params = self.model_config.get("isolation_forest") or self.model_config.get("iforest", {})
+        params = self._raw_model_config.get("isolation_forest") or self._raw_model_config.get("iforest", {})
         if not params or not isinstance(params, dict):
             return {"n_estimators": 100, "max_samples": "auto", "contamination": 0.05, "random_state": 42}
-        return {k: (v[0] if isinstance(v, list) and len(v) > 0 else v) for k, v in params.items()}
+        return params
 
     @property
     def ocsvm_params(self) -> Dict[str, Any]:
-        params = self.model_config.get("one_class_svm") or self.model_config.get("ocsvm", {})
+        params = self._raw_model_config.get("one_class_svm") or self._raw_model_config.get("ocsvm", {})
         if not params or not isinstance(params, dict):
             return {"kernel": "rbf", "nu": 0.05, "gamma": "scale"}
-        return {k: (v[0] if isinstance(v, list) and len(v) > 0 else v) for k, v in params.items()}
+        return params
 
     @property
     def cascade_params(self) -> Dict[str, Any]:
-        params = self.model_config.get("cascade", {})
+        params = self._raw_model_config.get("cascade", {})
         if not params or not isinstance(params, dict):
-            return {"iforest_anomaly_threshold": -0.6, "iforest_normal_threshold": -0.45, "threshold_percentile": 80, "model_version": "cascade-v1.0"}
-        return {k: (v[0] if isinstance(v, list) and len(v) > 0 else v) for k, v in params.items()}
-
-    @property
-    def grid_search_params(self) -> Dict[str, Any]:
-        return self.model_config.get("grid_search", {})
-
-    @property
-    def model_store_path(self) -> str:
-        return self.model_config.get("model_store_path", "models_store")
+            return {"iforest_anomaly_threshold": -0.6, "iforest_normal_threshold": -0.45, "threshold_percentile": 80, "model_version": "cascade-v2.0-clean"}
+        return params
 
     @property
     def risk_params(self) -> Dict[str, Any]:
-        return self.risk_config.get("risk_scoring", {})
+        params = self._raw_risk_config.get("risk_scoring", {})
+        if not params or not isinstance(params, dict):
+            return {"alpha": 0.6, "beta": 0.4, "max_wazuh_level": 15.0}
+        return params
 
     @property
     def risk_classification_params(self) -> Dict[str, Any]:
-        return self.risk_config.get("classification", {})
+        params = self._raw_risk_config.get("classification", {})
+        if not params or not isinstance(params, dict):
+            return {"low_threshold": 25.0, "medium_threshold": 50.0, "high_threshold": 80.0, "critical_threshold": 100.0}
+        return params
 
     @property
     def logging_params(self) -> Dict[str, Any]:
-        return self.logging_config or {
+        return self._raw_logging_config or {
             "level": "INFO",
             "file": "logs/lsmp_ai.log",
             "max_bytes": 10485760,
             "backup_count": 5
         }
 
-    @property
-    def data(self) -> DataConfig:
-        return DataConfig(
-            train_ratio=self.train_ratio,
-            test_ratio=self.test_ratio,
-            time_window_minutes=self.time_window_minutes
-        )
 
-    @property
-    def model(self) -> ModelConfig:
-        return ModelConfig(
-            model_store_path=self.model_store_path,
-            iforest_params=self.iforest_params,
-            ocsvm_params=self.ocsvm_params,
-            cascade_params=self.cascade_params
-        )
-
-# Global singleton configuration loader
+# Global Null-Safe Singleton Instance
 try:
     config = ConfigLoader()
-except Exception as e:
-    logger.warning(f"Could not initialize global ConfigLoader (might be running tests or outside package dir): {e}")
-    config = None
+except Exception as _e:
+    logger.warning(f"Initializing fallback ConfigLoader: {_e}")
+    config = ConfigLoader(config_dir="/invalid_fallback_path")
