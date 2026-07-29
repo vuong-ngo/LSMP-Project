@@ -1,17 +1,27 @@
 # ============================================================================
 # file: docker-compose.yml
-# Description: Docker Compose configuration for Wazuh agent.
+# Description: Docker Compose configuration for Wazuh Agent with dynamic .env injection.
 # ============================================================================
 
-# Wazuh App Copyright (C) 2017, Wazuh Inc. (License GPLv2)
 services:
   wazuh.agent:
     image: wazuh/wazuh-agent:4.14.6
+    container_name: wazuh-agent
     restart: always
     environment:
-      - WAZUH_MANAGER_IP=${WAZUH_MANAGER_IP}
-      - WAZUH_MANAGER_PORT=${WAZUH_MANAGER_PORT}
-      - AGENT_NAME=${AGENT_NAME}
-      - AGENT_GROUP=${AGENT_GROUP}
+      - WAZUH_MANAGER_SERVER=${WAZUH_MANAGER_IP:-127.0.0.1}
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        mkdir -p /var/ossec/etc
+        sed -e "s|__WAZUH_MANAGER_IP__|${WAZUH_MANAGER_IP:-127.0.0.1}|g" \
+            -e "s|__WAZUH_MANAGER_PORT__|${WAZUH_MANAGER_PORT:-1514}|g" \
+            -e "s|__ENROLL_IP__|${ENROLL_IP:-127.0.0.1}|g" \
+            -e "s|__ENROLL_PORT__|${ENROLL_PORT:-1514}|g" \
+            -e "s|__AGENT_NAME__|${AGENT_NAME:-sme-endpoint-01}|g" \
+            -e "s|__AGENT_GROUP__|${AGENT_GROUP:-default}|g" \
+            /wazuh-config-mount/etc/ossec.conf > /var/ossec/etc/ossec.conf
+        exec /init
     volumes:
-      - ./config/wazuh-agent-conf:/wazuh-config-mount/etc/ossec.conf
+      - ./config/wazuh-agent-conf:/wazuh-config-mount/etc/ossec.conf:ro
