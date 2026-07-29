@@ -9,7 +9,12 @@ services:
     container_name: wazuh-agent
     restart: always
     environment:
-      - WAZUH_MANAGER_SERVER=${WAZUH_MANAGER_IP:-127.0.0.1}
+      - WAZUH_MANAGER_IP=${WAZUH_MANAGER_IP:-127.0.0.1}
+      - WAZUH_MANAGER_PORT=${WAZUH_MANAGER_PORT:-1514}
+      - ENROLL_IP=${ENROLL_IP:-127.0.0.1}
+      - ENROLL_PORT=${ENROLL_PORT:-1514}
+      - AGENT_NAME=${AGENT_NAME:-sme-endpoint-01}
+      - AGENT_GROUP=${AGENT_GROUP:-default}
     entrypoint:
       - /bin/bash
       - -c
@@ -17,11 +22,11 @@ services:
         mkdir -p /var/ossec/etc
         sed -e "s|__WAZUH_MANAGER_IP__|${WAZUH_MANAGER_IP:-127.0.0.1}|g" \
             -e "s|__WAZUH_MANAGER_PORT__|${WAZUH_MANAGER_PORT:-1514}|g" \
-            -e "s|__ENROLL_IP__|${ENROLL_IP:-127.0.0.1}|g" \
-            -e "s|__ENROLL_PORT__|${ENROLL_PORT:-1514}|g" \
+            -e "s|__ENROLL_IP__|${ENROLL_IP:-${WAZUH_MANAGER_IP:-127.0.0.1}}|g" \
+            -e "s|__ENROLL_PORT__|${ENROLL_PORT:-${WAZUH_MANAGER_PORT:-1514}}|g" \
             -e "s|__AGENT_NAME__|${AGENT_NAME:-sme-endpoint-01}|g" \
             -e "s|__AGENT_GROUP__|${AGENT_GROUP:-default}|g" \
-            /wazuh-config-mount/etc/ossec.conf > /var/ossec/etc/ossec.conf
+            /wazuh-template/ossec.conf > /var/ossec/etc/ossec.conf
         exec /init
     volumes:
-      - ./config/wazuh-agent-conf:/wazuh-config-mount/etc/ossec.conf:ro
+      - ./config/wazuh-agent-conf:/wazuh-template/ossec.conf:ro
