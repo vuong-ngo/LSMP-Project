@@ -1,0 +1,8 @@
+# ======================================
+# file: requirements.txt
+# description: This file contains the list of dependencies required for the project.
+# ======================================
+
+redis==5.0.1
+SQLAlchemy==2.0.25
+psycopg2-binary==2.9.9

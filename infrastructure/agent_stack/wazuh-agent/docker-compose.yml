@@ -1,0 +1,14 @@
+# ============================================================================
+# file: docker-compose.yml
+# Description: Docker Compose configuration for Wazuh Agent with dynamic .env injection.
+# ============================================================================
+
+# Wazuh App Copyright (C) 2017, Wazuh Inc. (License GPLv2)
+services:
+  wazuh.agent:
+    image: wazuh/wazuh-agent:4.14.6
+    restart: always
+    environment:
+      - WAZUH_MANAGER_SERVER=<WAZUH_MANAGER_IP>
+    volumes:
+      - ./config/wazuh-agent-conf:/wazuh-config-mount/etc/ossec.conf

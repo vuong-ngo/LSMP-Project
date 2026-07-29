@@ -1,0 +1,80 @@
+# ============================================================================
+# file: database_server/docker-compose.yml
+# Description: Runs on DATABASE & AI SERVER (Server B).
+# ============================================================================
+
+services:
+  # ===== Redis: Buffer queue (Stream) =====
+  lsmp-redis:
+    image: redis:7.2-alpine
+    container_name: lsmp-redis
+    restart: always
+    networks:
+      - lsmp_backend
+    volumes:
+      - redis_data:/data
+    command: redis-server --requirepass "${REDIS_PASSWORD}" --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ===== Ingest Receiver: HTTP (from Fluent Bit on Server A) -> Redis XADD =====
+  lsmp-ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile.ingest
+    container_name: lsmp-ingest
+    restart: always
+    networks:
+      - lsmp_backend
+    ports:
+      # Exposed to the host network so Server A (Wazuh Server) can connect.
+      # Application-level token auth is implemented (see ingest_receiver.py).
+      - "8080:8080"
+    environment:
+      - REDIS_HOST=lsmp-redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - STREAM_KEY=wazuh_stream
+      - STREAM_MAXLEN=100000
+      - LISTEN_PORT=8080
+      - INGEST_TOKEN=${INGEST_TOKEN}
+      - USE_TLS=${USE_TLS:-true}
+      - SSL_CERT_FILE=/etc/ssl/certs/lsmp_ingest.crt
+      - SSL_KEY_FILE=/etc/ssl/certs/lsmp_ingest.key
+    volumes:
+      - ./certs:/etc/ssl/certs:ro
+    depends_on:
+      lsmp-redis:
+        condition: service_healthy
+
+  # ===== Database Writer: Redis Consume -> Postgres Batch Insert =====
+  lsmp-db-writer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lsmp-db-writer
+    restart: always
+    networks:
+      - lsmp_backend
+    environment:
+      - REDIS_HOST=lsmp-redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      # "lsmp-postgres" is the service name in database_stack/docker-compose.yml,
+      # reachable directly because both stacks join the "lsmp_backend" network.
+      - DATABASE_URL=postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@lsmp-postgres:5432/${DB_NAME:-lsmp_db}
+      - BATCH_SIZE=500
+      - BATCH_TIMEOUT=2.0
+    depends_on:
+      lsmp-redis:
+        condition: service_healthy
+
+networks:
+  lsmp_backend:
+    external: true
+
+volumes:
+  redis_data:

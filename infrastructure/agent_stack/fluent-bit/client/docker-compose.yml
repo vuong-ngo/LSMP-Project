@@ -1,0 +1,36 @@
+# ============================================================================
+# file: docker-compose.yml
+# description: Docker Compose configuration for Fluent-bit client agent. Sole agent to monitor host logs and ship to Loki and Wazuh Manager.
+# ============================================================================
+
+services:
+  # ===== Fluent-Bit: Sole agent to forward logs to Loki & Wazuh Manager =====
+  lsmp-client-fluent-bit:
+    image: fluent/fluent-bit:3.0
+    container_name: lsmp-client-fluent-bit
+    user: root
+    restart: always
+    environment:
+      - LOKI_HOST=${LOKI_HOST:-127.0.0.1}
+      - LOKI_PORT=${LOKI_PORT:-3100}
+      - LOKI_USER=${LOKI_USER:-}
+      - LOKI_PASSWORD=${LOKI_PASSWORD:-}
+      - WAZUH_HOST=${WAZUH_HOST:-127.0.0.1}
+      - WAZUH_PORT=${WAZUH_PORT:-514}
+      - CLIENT_HOSTNAME=${CLIENT_HOSTNAME:-client-01}
+      - ENV=${ENV:-production}
+      - ENABLE_TLS=${ENABLE_TLS:-On}
+      - TLS_VERIFY=${TLS_VERIFY:-On}
+    volumes:
+      # Read-only mount of the host log directory to monitor web and auth logs
+      - /var/log:/var/log:ro
+      # Configuration files mapping
+      - ./config/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+      - ./config/parsers.conf:/fluent-bit/etc/parsers.conf:ro
+      # TLS Certificates mount
+      - ./certs:/fluent-bit/certs:ro
+      # Persistent volume to store file tail offsets (avoids duplicates on restart)
+      - fluent_bit_db:/fluent-bit/db/
+
+volumes:
+  fluent_bit_db:

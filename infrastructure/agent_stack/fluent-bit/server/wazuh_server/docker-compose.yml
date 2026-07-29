@@ -1,0 +1,38 @@
+# ============================================================================
+# file: docker-compose.yml
+# description: Docker Compose for Fluent-bit on Wazuh Server
+#              Runs Fluent-bit to tail alerts and push to remote HTTP Ingest.
+# ============================================================================
+
+services:
+  lsmp-fluent-bit:
+    image: fluent/fluent-bit:3.0
+    container_name: lsmp-fluent-bit
+    user: root
+    restart: always
+    environment:
+      # Remote host and port of the lsmp-ingest service
+      - INGEST_HOST=${INGEST_HOST:-127.0.0.1}
+      - INGEST_PORT=${INGEST_PORT:-8080}
+      - INGEST_TOKEN=${INGEST_TOKEN}
+      - ENABLE_TLS=${ENABLE_TLS:-On}
+      - TLS_VERIFY=${TLS_VERIFY:-On}
+    volumes:
+      # Read-only mount of the shared Wazuh Manager logs volume
+      - wazuh_logs:/var/ossec/logs:ro
+      # Configuration mappings
+      - ./config/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+      - ./config/parsers.conf:/fluent-bit/etc/parsers.conf:ro
+      # TLS Certificates mount
+      - ./certs:/fluent-bit/certs:ro
+      # Persistent volume to store file tail offsets (avoids duplicates on restart)
+      - fluent_bit_db:/fluent-bit/db/
+
+volumes:
+  # Shared volume from Wazuh manager stack
+  wazuh_logs:
+    name: wazuh_logs
+    external: true
+  
+  # Persistent volume for tail offsets
+  fluent_bit_db:
