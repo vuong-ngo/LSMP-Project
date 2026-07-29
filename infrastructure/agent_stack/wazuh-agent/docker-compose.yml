@@ -3,13 +3,12 @@
 # Description: Docker Compose configuration for Wazuh Agent with dynamic .env injection.
 # ============================================================================
 
+# Wazuh App Copyright (C) 2017, Wazuh Inc. (License GPLv2)
 services:
   wazuh.agent:
     image: wazuh/wazuh-agent:4.14.6
-    container_name: wazuh-agent
     restart: always
     environment:
-      - WAZUH_MANAGER_IP=${WAZUH_MANAGER_IP:-127.0.0.1}
-      - WAZUH_MANAGER_PORT=${WAZUH_MANAGER_PORT:-1514}
+      - WAZUH_MANAGER_SERVER=<WAZUH_MANAGER_IP>
     volumes:
-      - ./config/wazuh-agent-conf:/wazuh-template/ossec.conf:ro
+      - ./config/wazuh-agent-conf:/wazuh-config-mount/etc/ossec.conf
