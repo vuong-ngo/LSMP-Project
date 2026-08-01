@@ -375,6 +375,11 @@ class DBClient:
                 hyperparameters = EXCLUDED.hyperparameters,
                 evaluated_at = EXCLUDED.evaluated_at
         """)
+
+        if not self.db_url:
+            logger.warning("DATABASE_URL is not set. Skipping database metric write.")
+            return
+
         try:
             with self.engine.begin() as conn:
                 conn.execute(query, {
@@ -397,7 +402,7 @@ class DBClient:
                 })
             logger.info(f"Successfully recorded evaluation metrics (Run ID: {run_id}) to database.")
         except Exception as e:
-            logger.error(f"Error writing evaluation metrics to database: {e}")
+            logger.warning(f"Could not record evaluation metrics to database (DB offline/unreachable): {e}")
 
     def write_model_comparison_benchmark(
         self,
