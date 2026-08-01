@@ -24,9 +24,9 @@ infrastructure/agent_stack/fluent-bit/server/wazuh_server/
 
 The log forwarding agent runs as a single lightweight container, sharing volume mounts with the Wazuh Manager:
 
-| Component | Container Name | Default Ports | Description |
-| :--- | :--- | :--- | :--- |
-| **Fluent-bit Agent** | `lsmp-fluent-bit` | None | Mounts the Wazuh manager alert volume as read-only (`ro`) and ships JSON lines to Server B with transport-level TLS encryption and token verification. |
+| Component                  | Container Name      | Default Ports | Description                                                                                                                                              |
+| :------------------------- | :------------------ | :------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Fluent-bit Agent** | `lsmp-fluent-bit` | None          | Mounts the Wazuh manager alert volume as read-only (`ro`) and ships JSON lines to Server B with transport-level TLS encryption and token verification. |
 
 ---
 
@@ -55,6 +55,7 @@ The log forwarding agent runs as a single lightweight container, sharing volume 
 The script configures TLS Root CA validation and sets the `INGEST_TOKEN` secret required to authenticate HTTP requests sent to Server B.
 
 #### **Script CLI Options**
+
 ```text
 Usage: bash generate_keys.sh [OPTIONS]
 
@@ -70,40 +71,52 @@ Options:
 #### **Provisioning Methods:**
 
 #### **Method 1: Command-Line Flags (Recommended for Remote Deployment)**
+
 Pass the token and optional Root CA certificate path directly:
+
 ```bash
 bash generate_keys.sh \
-  --token 7edf597441bc1d635d732d5174bd7dfd50df300b03b39b543849cf2d157fcdc6 \
-  --host 192.168.1.50 \
+  --token <TOKEN> \
+  --host 127.0.0.1 \
   --ca-cert /path/to/ca.crt
 ```
 
 #### **Method 2: Auto-Sync (Local Single-Host / Dev Deployments)**
+
 If `wazuh_server` and `database_server` reside in the same repository tree (e.g., local development), simply run:
+
 ```bash
 bash generate_keys.sh
 ```
+
 The script will automatically detect `ca.crt` and extract `INGEST_TOKEN` from `database_server/.env`.
 
 #### **Method 3: Interactive Prompt**
+
 Run the script without arguments on a remote machine where `ca.crt` has been manually placed in `./certs/ca.crt`:
+
 ```bash
 bash generate_keys.sh
 ```
+
 ```text
-🔑 Enter INGEST_TOKEN generated on Database Server: 7edf597441bc1d635d732d5174bd7dfd50df300b03b39b543849cf2d157fcdc6
+🔑 Enter INGEST_TOKEN generated on Database Server: <hash_token>
 ```
 
 #### **Method 4: Manual `.env` Setup**
+
 Copy `.env.example` to `.env` and configure variables manually:
+
 ```bash
 cp .env.example .env
 ```
+
 Edit `.env`:
+
 ```env
-INGEST_HOST=192.168.1.50
+INGEST_HOST=127.0.0.1
 INGEST_PORT=8080
-INGEST_TOKEN=7edf597441bc1d635d732d5174bd7dfd50df300b03b39b543849cf2d157fcdc6
+INGEST_TOKEN=<TOKEN>
 ENABLE_TLS=On
 TLS_VERIFY=On
 ```
@@ -113,11 +126,13 @@ TLS_VERIFY=On
 ### 3. Startup & Verification
 
 Start the Fluent-bit shipper service:
+
 ```bash
 docker compose up -d --build
 ```
 
 Check the shipping agent logs to verify successful HTTPS stream ingestion:
+
 ```bash
 docker compose logs -f
 ```
@@ -127,6 +142,7 @@ docker compose logs -f
 ## 🛑 Teardown & Maintenance
 
 To stop the log forwarding agent:
+
 ```bash
 docker compose down
 ```
