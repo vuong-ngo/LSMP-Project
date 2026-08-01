@@ -29,11 +29,11 @@ infrastructure/agent_stack/fluent-bit/server/database_server/
 
 The database server stack runs **three core components** that communicate internally over the shared Docker network:
 
-| Component | Container Name | Default Ports | Description |
-| :--- | :--- | :--- | :--- |
-| **Ingest Receiver** | `lsmp-ingest` | `8080/tcp` (Exposed) | A secure HTTPS endpoint `/ingest` that validates tokens, enforces body size limits, and appends raw log lines into Redis. |
-| **Redis Queue Cache** | `lsmp-redis` | `6379/tcp` (Internal) | A secured, persistent in-memory stream buffer (`wazuh_stream`) acting as a backpressure safety valve. |
-| **Database Writer** | `lsmp-db-writer` | None | A background daemon consuming events from Redis and performing batch INSERT transactions into the database. |
+| Component                   | Container Name     | Default Ports           | Description                                                                                                                |
+| :-------------------------- | :----------------- | :---------------------- | :------------------------------------------------------------------------------------------------------------------------- |
+| **Ingest Receiver**   | `lsmp-ingest`    | `8080/tcp` (Exposed)  | A secure HTTPS endpoint`/ingest` that validates tokens, enforces body size limits, and appends raw log lines into Redis. |
+| **Redis Queue Cache** | `lsmp-redis`     | `6379/tcp` (Internal) | A secured, persistent in-memory stream buffer (`wazuh_stream`) acting as a backpressure safety valve.                    |
+| **Database Writer**   | `lsmp-db-writer` | None                    | A background daemon consuming events from Redis and performing batch INSERT transactions into the database.                |
 
 ---
 
@@ -54,6 +54,7 @@ The database server stack runs **three core components** that communicate intern
 ### 1. Prerequisites
 
 Ensure you have created the shared external bridge network before starting the stack:
+
 ```bash
 docker network create lsmp_backend
 ```
@@ -62,31 +63,58 @@ docker network create lsmp_backend
 
 ### 2. Generating `INGEST_TOKEN` & TLS Certificates
 
-Run the standalone key generator script:
+Run the standalone key generator script on **Server B** (Database Server):
+
 ```bash
 bash generate_keys.sh
 ```
 
-**What the script does:**
-* Generates a 64-character hex `INGEST_TOKEN` using `openssl rand -hex 32`.
-* Generates a 32-character random `REDIS_PASSWORD`.
-* Creates Root CA certificates (`ca.crt`, `ca.key`) and Ingest Server SSL certificates (`lsmp_ingest.crt`, `lsmp_ingest.key`).
-* Automatically writes `INGEST_TOKEN` and `REDIS_PASSWORD` into `.env`.
+#### **Script CLI Options & Flexibility**
+
+The script supports several flags for customized or non-interactive setups:
+
+```text
+Usage: bash generate_keys.sh [OPTIONS]
+
+Options:
+  --token, -t <TOKEN>         Specify a custom INGEST_TOKEN (64-char hex recommended)
+  --redis-pass, -r <PASS>     Specify a custom REDIS_PASSWORD
+  --force, -f                 Force re-generation of TLS certificates and random tokens
+  --help, -h                  Show this help message
+```
+
+#### **Key Generation Behavior & Safety:**
+
+* **Token & Password Preservation**: If a valid `INGEST_TOKEN` or `REDIS_PASSWORD` already exists in `.env`, the script **retains them by default** so existing connected shippers (like Wazuh Fluent-Bit) are not disconnected.
+* **Token Generation**: Generates a secure random 64-character hex `INGEST_TOKEN` (`openssl rand -hex 32`) if none exists.
+* **Redis Password**: Generates a secure 24-character random password if none exists.
+* **TLS Certificates**: Generates Root CA certificates (`ca.crt`, `ca.key`) and Ingest Server SSL certificates (`lsmp_ingest.crt`, `lsmp_ingest.key`) with SAN IP/DNS configuration. Certificates are preserved unless `--force` / `-f` is passed.
+* **Environment File Sync**: Automatically updates `.env` with `INGEST_TOKEN`, `REDIS_PASSWORD`, and `USE_TLS=true`.
 
 **Printed Output Example:**
+
 ```text
-✅ DATABASE SERVER SECURITY KEYS SUCCESSFULLY GENERATED!
+=================================================================
+🔒  LSMP SECURITY: GENERATING DATABASE SERVER KEYS & CERTIFICATES
+=================================================================
+ℹ️  Retaining existing INGEST_TOKEN from .../database_server/.env
+ℹ️  Retaining existing REDIS_PASSWORD from .../database_server/.env
+✅ Existing TLS Certificates found in .../database_server/certs. Skipping certificate generation.
+   (Use --force or -f to regenerate certificates)
+⚙️  Updating environment file (.../database_server/.env)...
+=================================================================
+✅ DATABASE SERVER SECURITY KEYS SUCCESSFULLY CONFIGURED!
 -----------------------------------------------------------------
 📍 Certs Directory : .../database_server/certs
 📄 Server Cert     : .../database_server/certs/lsmp_ingest.crt
 🔑 Server Key      : .../database_server/certs/lsmp_ingest.key
 📜 Root CA Cert    : .../database_server/certs/ca.crt
-🔑 Generated Token : 7edf597441bc1d635d732d5174bd7dfd50df300b03b39b543849cf2d157fcdc6
+🔑 Configured Token: <TOKEN>
 =================================================================
 ```
 
 > [!TIP]
-> **To retrieve the token at any time later:**  
+> **To retrieve the token at any time later:**
 > Run: `grep "^INGEST_TOKEN=" .env | cut -d '=' -f2`
 
 ---
@@ -94,11 +122,13 @@ bash generate_keys.sh
 ### 3. Startup & Build
 
 To build the custom Python runner images and start the containers in the background:
+
 ```bash
 docker compose up -d --build
 ```
 
 Verify HTTPS listener in the logs:
+
 ```bash
 docker logs lsmp-ingest
 ```
@@ -108,11 +138,13 @@ docker logs lsmp-ingest
 ## 🛑 Teardown & Maintenance
 
 To safely stop the database server ingestion stack:
+
 ```bash
 docker compose down
 ```
 
 To stop the services and purge the Redis persistent data volume:
+
 ```bash
 docker compose down -v
 ```

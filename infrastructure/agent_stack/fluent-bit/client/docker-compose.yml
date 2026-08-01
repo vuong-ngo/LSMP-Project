@@ -15,6 +15,7 @@ services:
       - LOKI_PORT=${LOKI_PORT:-3100}
       - LOKI_USER=${LOKI_USER:-}
       - LOKI_PASSWORD=${LOKI_PASSWORD:-}
+      - LOKI_TENANT_ID=${LOKI_TENANT_ID:-tenant1}
       - WAZUH_HOST=${WAZUH_HOST:-127.0.0.1}
       - WAZUH_PORT=${WAZUH_PORT:-514}
       - CLIENT_HOSTNAME=${CLIENT_HOSTNAME:-client-01}
