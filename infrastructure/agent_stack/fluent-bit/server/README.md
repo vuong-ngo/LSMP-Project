@@ -78,14 +78,20 @@ The log ingestion pipeline operates across two physical hosts:
 cd database_server/
 bash generate_keys.sh
 ```
-This generates high-entropy `INGEST_TOKEN`, `REDIS_PASSWORD`, TLS Certificates (`lsmp_ingest.crt`/`.key`), and configures `.env`.
+* **Options**: Use `bash generate_keys.sh --help` to view CLI flags.
+* **Flags**:
+  - `--token <TOKEN>`: Set specific `INGEST_TOKEN`.
+  - `--redis-pass <PASS>`: Set specific `REDIS_PASSWORD`.
+  - `--force`: Force re-generating TLS certificates and random tokens (by default, existing valid tokens and certificates in `.env` and `certs/` are preserved).
+* **Generated Files**: `certs/ca.crt`, `certs/ca.key`, `certs/lsmp_ingest.crt`, `certs/lsmp_ingest.key`, and `.env`.
 
 #### On Server A (Wazuh Manager Server):
-Copy `ca.crt` to `wazuh_server/certs/ca.crt` and execute:
+Execute the configuration script:
 ```bash
 cd wazuh_server/
-bash generate_keys.sh --token <TOKEN_FROM_SERVER_B>
+bash generate_keys.sh --token <TOKEN_FROM_SERVER_B> --ca-cert /path/to/ca.crt --host <SERVER_B_IP>
 ```
+* Or copy `ca.crt` directly into `wazuh_server/certs/ca.crt` and run `bash generate_keys.sh --token <TOKEN_FROM_SERVER_B>`.
 
 ---
 
@@ -97,7 +103,7 @@ Ensure your `database_stack` PostgreSQL container is running and healthy. Then r
 cd database_server/
 docker compose up -d --build
 ```
-> Verify HTTPS status: `docker logs lsmp-ingest`  
+> Verify HTTPS status: `docker logs lsmp-ingest`
 > Expected line: `LSMP Ingest Receiver listening securely (HTTPS/TLS) at https://0.0.0.0:8080/ingest`
 
 #### B. Start Log Forwarding agent (Server A)
