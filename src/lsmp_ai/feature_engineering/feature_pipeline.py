@@ -52,13 +52,21 @@ class FeaturePipeline:
         ])
 
     def _prepare_input(self, X: Union[pd.DataFrame, np.ndarray]) -> Union[pd.DataFrame, np.ndarray]:
-        """Extracts required feature columns if DataFrame is provided, else returns array."""
+        """Extracts required feature columns if DataFrame is provided, else returns array.
+
+        Always enforces the correct column order matching self.feature_cols.
+        Missing columns are filled with 0.0 to prevent silent schema mismatches.
+        """
         if isinstance(X, pd.DataFrame):
-            missing = [c for c in self.feature_cols if c not in X.columns]
-            if not missing:
-                res = X[self.feature_cols].copy()
-                return res.replace([np.inf, -np.inf], np.nan)
-            return X.replace([np.inf, -np.inf], np.nan)
+            df_copy = X.copy()
+            missing = [c for c in self.feature_cols if c not in df_copy.columns]
+            if missing:
+                logger.warning(f"Missing {len(missing)} feature columns, filling with 0.0: {missing}")
+                for col in missing:
+                    df_copy[col] = 0.0
+            # Always enforce exact column order matching FEATURE_COLUMNS
+            res = df_copy[self.feature_cols]
+            return res.replace([np.inf, -np.inf], np.nan)
         if isinstance(X, np.ndarray):
             arr = np.copy(X)
             arr[np.isinf(arr)] = np.nan
