@@ -22,7 +22,7 @@ class OCSVMModel(BaseModel):
     Outliers or anomalous samples fall outside this boundary in high-dimensional feature space.
 
     Attributes:
-        params (Dict[str, Any]): Dictionary of hyperparameters passed to the
+        params (Dict[str, Any]): Dictionary of hyperparameters passed to the 
             underlying scikit-learn OneClassSVM estimator.
         model (OneClassSVM): The scikit-learn OneClassSVM instance.
     """
@@ -40,7 +40,7 @@ class OCSVMModel(BaseModel):
         if params is not None:
             all_params.update(params)
         all_params.update(kwargs)
-
+        
         if not all_params:
             all_params = config.ocsvm_params if config else {
                 "kernel": "rbf",
@@ -60,7 +60,7 @@ class OCSVMModel(BaseModel):
         to prevent excessive training time (OCSVM has O(n²)-O(n³) complexity).
 
         Args:
-            X (Union[pd.DataFrame, np.ndarray]): The input feature matrix of shape
+            X (Union[pd.DataFrame, np.ndarray]): The input feature matrix of shape 
                 (n_samples, n_features) representing the training data.
             y (Any, optional): Ignored. Included for API consistency with BaseModel.
 
@@ -81,7 +81,7 @@ class OCSVMModel(BaseModel):
         self.model.fit(X)
         logger.info("One-Class SVM training complete.")
         return self
-
+        
     def predict(self, X: Union[pd.DataFrame, np.ndarray]) -> np.ndarray:
         """Predicts the anomaly labels for the given samples.
 
@@ -89,11 +89,11 @@ class OCSVMModel(BaseModel):
             X (Union[pd.DataFrame, np.ndarray]): Input feature matrix to predict.
 
         Returns:
-            np.ndarray: A 1D array of shape (n_samples,) containing predicted labels.
+            np.ndarray: A 1D array of shape (n_samples,) containing predicted labels. 
                 Returns 1 for normal samples (inliers) and -1 for anomalous samples (outliers).
         """
         return self.model.predict(X)
-
+        
     def score(self, X: Union[pd.DataFrame, np.ndarray]) -> np.ndarray:
         """Computes raw decision function anomaly scores for each sample.
 
@@ -106,7 +106,7 @@ class OCSVMModel(BaseModel):
         """
         scores = self.model.decision_function(X)
         return np.asarray(scores).ravel()
-
+        
     def save(self, filepath: str) -> None:
         """Serializes and saves the scikit-learn model using joblib.
 
@@ -118,7 +118,7 @@ class OCSVMModel(BaseModel):
         """
         joblib.dump(self.model, filepath)
         logger.info(f"Saved One-Class SVM model to {filepath}")
-
+        
     def load(self, filepath: str) -> 'OCSVMModel':
         """Loads a serialized model state using joblib.
 
