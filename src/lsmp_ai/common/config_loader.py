@@ -216,6 +216,13 @@ class ConfigLoader:
         return params
 
     @property
+    def risk(self) -> SubConfig:
+        r_params = self.risk_params
+        c_params = self.risk_classification_params
+        merged = {**r_params, **c_params}
+        return SubConfig(**merged)
+
+    @property
     def logging_params(self) -> Dict[str, Any]:
         return self._raw_logging_config or {
             "level": "INFO",
