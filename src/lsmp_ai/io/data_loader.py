@@ -35,7 +35,7 @@ class DataLoader:
     ) -> pd.DataFrame:
         if self._db is None:
             raise DataValidationError("DatabaseClient not configured")
-            
+
         if table in ["anomaly_result", "feature_vectors"]:
             # Leverage the automated JSONB flattener inside db_client
             df = self._db.fetch_features_with_labels()
@@ -44,7 +44,7 @@ class DataLoader:
         else:
             query = f"SELECT * FROM {table} LIMIT :limit"
             df = self._db.fetch_df(query, limit=limit)
-            
+
         logger.info(f"Loaded {len(df)} rows from {table}")
         return df
 
@@ -58,6 +58,18 @@ class DataLoader:
         return train, test
 
     @staticmethod
+    def optimize_dtypes(df: pd.DataFrame, feature_cols: list[str] | None = None) -> pd.DataFrame:
+        """Optimizes DataFrame memory footprint by downcasting 64-bit types to 32-bit types."""
+        cols = feature_cols or [c for c in df.columns if c in FEATURE_COLUMNS]
+        for col in cols:
+            if col in df.columns:
+                if df[col].dtype == 'float64':
+                    df[col] = df[col].astype('float32')
+                elif df[col].dtype == 'int64':
+                    df[col] = df[col].astype('int32')
+        return df
+
+    @staticmethod
     def split_features_target(
         df: pd.DataFrame,
         feature_cols: list[str] | None = None,
@@ -68,7 +80,7 @@ class DataLoader:
         if missing:
             raise DataValidationError(f"Missing feature columns: {missing}")
 
-        X = df[cols].copy()
+        X = DataLoader.optimize_dtypes(df[cols].copy())
         y = df[label_col].copy() if label_col in df.columns else None
         return X, y
 

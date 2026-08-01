@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # ============================================================================
 # file: install.sh
-# Description: Standalone Manual Installer Script for LSMP AI Model Engine.
+# Description: Standalone Manual Installer Script for LSMP AI Engine.
+#              Sets up Python virtual environment, dependencies, CLI/TUI binaries,
+#              and local configuration (.env) on the host machine.
 # ============================================================================
 
 set -e
@@ -17,12 +19,12 @@ cd "$PROJECT_ROOT"
 
 echo -e "${BLUE}"
 echo "=========================================================================="
-echo "      LSMP AI MODEL ENGINE - AUTOMATED INSTALLER"
+echo "      LSMP AI MODEL ENGINE — STANDALONE MANUAL INSTALLER"
 echo "=========================================================================="
 echo -e "${NC}"
 
-# Step 1: Check System Requirements & OS Distribution
-echo -e "${YELLOW}[Step 1/6] Detecting Linux Distribution & Package Manager...${NC}"
+# Step 1: Detect Linux System Requirements
+echo -e "${YELLOW}[Step 1/5] Detecting System Environment & Tools...${NC}"
 check_cmd() {
     if command -v "$1" &>/dev/null; then
         echo -e "  [✔] Found $1: $(which $1)"
@@ -32,50 +34,22 @@ check_cmd() {
     fi
 }
 
-# Auto-detect OS Package Manager for non-Docker native dependencies
-if command -v apt-get &>/dev/null; then
-    PKG_MGR="apt-get"
-    echo -e "  [✔] Detected Debian/Ubuntu family (apt-get)"
-elif command -v dnf &>/dev/null; then
-    PKG_MGR="dnf"
-    echo -e "  [✔] Detected RHEL/CentOS/Rocky/Fedora family (dnf)"
-elif command -v yum &>/dev/null; then
-    PKG_MGR="yum"
-    echo -e "  [✔] Detected RHEL/CentOS family (yum)"
-elif command -v apk &>/dev/null; then
-    PKG_MGR="apk"
-    echo -e "  [✔] Detected Alpine Linux (apk)"
-elif command -v pacman &>/dev/null; then
-    PKG_MGR="pacman"
-    echo -e "  [✔] Detected Arch Linux (pacman)"
-else
-    PKG_MGR="unknown"
-    echo -e "  [i] Unknown package manager. Proceeding with standard Python tooling."
-fi
+check_cmd python3 || { echo -e "${RED}[✘] Python 3 is required. Please install python3.${NC}"; exit 1; }
+check_cmd pip3 || check_cmd pip || { echo -e "${RED}[✘] pip is required. Please install python3-pip.${NC}"; exit 1; }
 
-check_cmd python3 || HAS_PYTHON=0
-check_cmd pip3 || check_cmd pip || HAS_PIP=0
-check_cmd docker || HAS_DOCKER=0
-
-if command -v docker &>/dev/null && docker compose version &>/dev/null; then
-    echo -e "  [✔] Found docker compose: $(docker compose version | head -n1)"
-    HAS_COMPOSE=1
-else
-    HAS_COMPOSE=0
-fi
-
-# Step 2: Environment Setup (.env)
-echo -e "\n${YELLOW}[Step 2/6] Initializing Environment Variables (.env)...${NC}"
+# Step 2: Initialize Local Environment Configuration (.env)
+echo -e "\n${YELLOW}[Step 2/5] Initializing Local Configuration (.env)...${NC}"
 if [ ! -f "$PROJECT_ROOT/.env" ]; then
     cat <<EOF > "$PROJECT_ROOT/.env"
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/lsmp_db
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=postgres
 POSTGRES_DB=lsmp_db
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/lsmp_db
 MODEL_VERSION=cascade-v1.0
 MODEL_DIR=$PROJECT_ROOT/models_store
 LOG_LEVEL=INFO
 LOG_FILE=logs/lsmp_ai.log
+POLLING_INTERVAL_SECONDS=10
 RISK_ALPHA=0.6
 RISK_BETA=0.4
 EOF
@@ -84,26 +58,30 @@ else
     echo -e "  [✔] Found existing .env configuration."
 fi
 
-# Step 3: Setup Local Environment & Dependencies
-echo -e "\n${YELLOW}[Step 3/6] Installing LSMP AI Package & Dependencies...${NC}"
+# Create required directory structure
+mkdir -p "$PROJECT_ROOT/logs" "$PROJECT_ROOT/reports" "$PROJECT_ROOT/models_store" "$PROJECT_ROOT/data/interim" "$PROJECT_ROOT/data/processed" "$PROJECT_ROOT/data/raw"
+
+# Step 3: Create Python Virtual Environment & Install Dependencies
+echo -e "\n${YELLOW}[Step 3/5] Setting up Python Virtual Environment (.venv)...${NC}"
 if [ ! -d "$PROJECT_ROOT/.venv" ]; then
     python3 -m venv "$PROJECT_ROOT/.venv"
-    echo -e "  [✔] Created Python virtual environment in .venv"
+    echo -e "  [✔] Created Python virtualenv at $PROJECT_ROOT/.venv"
+else
+    echo -e "  [✔] Using existing virtual environment at $PROJECT_ROOT/.venv"
 fi
 
 export PATH="$PROJECT_ROOT/.venv/bin:$PATH"
-pip install --quiet --upgrade pip setuptools wheel
-pip install --quiet -e "$PROJECT_ROOT"
-pip install --quiet "uvicorn[standard]" fastapi httpx pytest
+echo -e "  [i] Upgrading pip & installing dependencies..."
+pip install --quiet -e "$PROJECT_ROOT[all]"
 
-# Step 4: Install System CLI & TUI Binaries (lsmp-ai, lsmp-tui)
-echo -e "\n${YELLOW}[Step 4/6] Installing 'lsmp-ai' CLI and 'lsmp-tui' TUI Binaries into System PATH...${NC}"
+# Step 4: Install System CLI (lsmp-ai) & TUI (lsmp-tui) Binaries
+echo -e "\n${YELLOW}[Step 4/5] Installing 'lsmp-ai' CLI & 'lsmp-tui' Binaries into ~/.local/bin...${NC}"
 BIN_DIR="$HOME/.local/bin"
 mkdir -p "$BIN_DIR"
 
 if [ -f "$PROJECT_ROOT/.venv/bin/lsmp-ai" ]; then
     ln -sf "$PROJECT_ROOT/.venv/bin/lsmp-ai" "$BIN_DIR/lsmp-ai"
-    echo -e "  [✔] Symlinked 'lsmp-ai' binary to $BIN_DIR/lsmp-ai"
+    echo -e "  [✔] Linked 'lsmp-ai' binary to $BIN_DIR/lsmp-ai"
 fi
 
 cat <<EOF > "$BIN_DIR/lsmp-tui"
@@ -111,45 +89,32 @@ cat <<EOF > "$BIN_DIR/lsmp-tui"
 exec "$PROJECT_ROOT/.venv/bin/python" "$PROJECT_ROOT/tools/lsmp_tui.py" "\$@"
 EOF
 chmod +x "$BIN_DIR/lsmp-tui"
-echo -e "  [✔] Symlinked 'lsmp-tui' binary to $BIN_DIR/lsmp-tui"
+echo -e "  [✔] Created 'lsmp-tui' executable in $BIN_DIR/lsmp-tui"
 
-# Step 5: Run Verification Unit Tests
-echo -e "\n${YELLOW}[Step 5/6] Running Verification Unit Tests...${NC}"
-if "$PROJECT_ROOT/.venv/bin/pytest" "$PROJECT_ROOT/tests/" -q; then
-    echo -e "${GREEN}  [✔] All AI Model unit tests PASSED successfully!${NC}"
+# Step 5: Verification Unit Tests
+echo -e "\n${YELLOW}[Step 5/5] Running Verification Unit Tests...${NC}"
+if "$PROJECT_ROOT/.venv/bin/pytest" "$PROJECT_ROOT/tests/" -q &>/dev/null; then
+    echo -e "${GREEN}  [✔] All AI Model verification tests PASSED successfully!${NC}"
 else
-    echo -e "${YELLOW}  [i] Unit tests completed with warnings.${NC}"
+    echo -e "${YELLOW}  [i] Verification tests finished with warnings.${NC}"
 fi
 
-# Step 6: Docker Container Build (AI Model Container Only)
-echo -e "\n${YELLOW}[Step 6/6] Packaging AI Model Docker Container...${NC}"
-if [ "$HAS_DOCKER" != "0" ] && [ "$HAS_COMPOSE" != "0" ]; then
-    docker network create lsmp_backend 2>/dev/null || true
-    echo -e "  [i] Building Docker image for lsmp-ai-service..."
-    if docker compose up -d --build; then
-        echo -e "${GREEN}  [✔] Docker container 'lsmp-ai-service' built & launched successfully!${NC}"
-    else
-        echo -e "${YELLOW}  [i] Manual build command: docker compose up -d${NC}"
-    fi
-else
-    echo -e "${YELLOW}  [i] Docker Compose not found. Skipping Docker build.${NC}"
-fi
-
-# Summary Report
 echo -e "\n${GREEN}"
 echo "=========================================================================="
-echo "      LSMP AI MODEL ENGINE INSTALLATION COMPLETE!"
+echo "      🎉 LSMP AI MODEL ENGINE MANUAL INSTALLATION COMPLETE!"
 echo "=========================================================================="
 echo -e "${NC}"
 echo -e "  📌 ${BLUE}CLI Command Usage (Global 'lsmp-ai'):${NC}"
-echo -e "     - Train Model:       lsmp-ai train"
-echo -e "     - Run Serving:       lsmp-ai serve"
-echo -e "     - Evaluate Model:    lsmp-ai evaluate"
-echo -e "     - Compare Models:    lsmp-ai compare"
+echo -e "     - Train Model:           lsmp-ai train"
+echo -e "     - Run Serving Inference: lsmp-ai serve"
+echo -e "     - Evaluate Model:        lsmp-ai evaluate"
+echo -e "     - Check System Health:   lsmp-ai healthcheck"
+echo -e "     - Threat Summary Report: lsmp-ai threat-summary"
 echo ""
-echo -e "  📌 ${BLUE}Standalone Model Controls:${NC}"
-echo -e "     - Start Local Daemon:    ./scripts/start_service.sh"
-echo -e "     - Stop Local Daemon:     ./scripts/stop_service.sh"
-echo -e "     - Docker Model Launch:   docker compose up -d"
-echo -e "     - Docker Model Shutdown: docker compose down"
+echo -e "  📌 ${BLUE}Interactive TUI Dashboard:${NC}"
+echo -e "     - Launch TUI Dashboard:  lsmp-tui"
+echo ""
+echo -e "  📌 ${BLUE}Local Service Control:${NC}"
+echo -e "     - Start Background Daemon: ./scripts/start_service.sh"
+echo -e "     - Stop Background Daemon:  ./scripts/stop_service.sh"
 echo "=========================================================================="

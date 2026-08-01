@@ -1,17 +1,22 @@
 # ============================================================================
 # file: src/lsmp_ai/scripts/__init__.py
-# Description: LSMP AI standalone scripts package inside src/lsmp_ai/.
+# Description: LSMP AI Core Python Scripts Package inside src/lsmp_ai/scripts/.
 # ============================================================================
 
-from lsmp_ai.scripts.prepare_cicids2017 import prepare_full_cicids2017_dataset
-from lsmp_ai.scripts.export_models_to_db import export_models_and_metrics_to_db
-from lsmp_ai.scripts.export_eval_benchmarks import populate_standalone_eval_tables
-from lsmp_ai.scripts.healthcheck_services import audit_model_health, main as run_healthcheck
+from lsmp_ai.scripts.train import run_training
+from lsmp_ai.scripts.status import show_program_status
+from lsmp_ai.scripts.serve import start_serving_daemon, stop_serving_daemon
+from lsmp_ai.scripts.autotrain import start_autotrain_daemon, stop_autotrain_daemon
+from lsmp_ai.scripts.evaluate import run_evaluation
+from lsmp_ai.scripts.export_db import export_models_to_db
 
 __all__ = [
-    "prepare_full_cicids2017_dataset",
-    "export_models_and_metrics_to_db",
-    "populate_standalone_eval_tables",
-    "audit_model_health",
-    "run_healthcheck",
+    "run_training",
+    "show_program_status",
+    "start_serving_daemon",
+    "stop_serving_daemon",
+    "start_autotrain_daemon",
+    "stop_autotrain_daemon",
+    "run_evaluation",
+    "export_models_to_db",
 ]
