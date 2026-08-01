@@ -148,7 +148,7 @@ def run_iforest_ocsvm_comparison(
     if X_train is None or X_test is None or y_test is None:
         from pathlib import Path
         from lsmp_ai.common.constants import FEATURE_COLUMNS
-        
+
         df = None
         if dataset_path and Path(dataset_path).exists():
             df = pd.read_csv(dataset_path)
@@ -161,7 +161,7 @@ def run_iforest_ocsvm_comparison(
                 if p.exists():
                     df = pd.read_csv(p)
                     break
-        
+
         if df is not None:
             feature_cols = [c for c in FEATURE_COLUMNS if c in df.columns]
             label_col = "label" if "label" in df.columns else ("ground_truth_label" if "ground_truth_label" in df.columns else None)
