@@ -1,6 +1,6 @@
 # ============================================================================
-# file: docker-compose.yml
-# Description: Docker Compose configuration for Grafana Loki.
+# file: docker-compose.yaml
+# description: Docker Compose file for setting up Grafana Loki distributed service.
 # ============================================================================
 
 ---
@@ -8,13 +8,10 @@ networks:
   loki:
 
 services:
-  # ===== Read Service: Query Frontend (Servicediscovery-compatible) =====
+  # ===== Grafana Loki Distributed Service Configuration =====
   read:
-    image: grafana/loki:${LOKI_VERSION:-3.7.3}
-    command: "-config.file=/etc/loki/config.yaml -config.expand-env=true -target=read"
-    environment:
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-loki}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-supersecret}
+    image: grafana/loki:${LOKI_VERSION:-latest}
+    command: "-config.file=/etc/loki/config.yaml -target=read"
     ports:
       - 3101:3100
       - 7946
@@ -34,13 +31,10 @@ services:
         aliases:
           - loki
 
-  # ===== Write Service: Ingestion & Indexing =====
+  # ===== Grafana Loki Distributed Service Configuration =====
   write:
-    image: grafana/loki:${LOKI_VERSION:-3.7.3}
-    command: "-config.file=/etc/loki/config.yaml -config.expand-env=true -target=write"
-    environment:
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-loki}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-supersecret}
+    image: grafana/loki:${LOKI_VERSION:-latest}
+    command: "-config.file=/etc/loki/config.yaml -target=write"
     ports:
       - 3102:3100
       - 7946
@@ -58,12 +52,18 @@ services:
     networks:
       <<: *loki-dns
 
-  # ===== Agent Service: Grafana Alloy (Agent for log collection) =====
+  # ===== Grafana Alloy Service Configuration =====
   alloy:
-    image: grafana/alloy:${ALLOY_VERSION:-v1.7.1}
+    image: grafana/alloy:${ALLOY_VERSION:-latest}
+    container_name: alloy
+    pid: host
     volumes:
       - ./config/alloy-local-config.yaml:/etc/alloy/config.alloy:ro
       - /var/run/docker.sock:/var/run/docker.sock
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro
+      - /var/log:/var/log:ro
     command: run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
     ports:
       - 12345:12345
@@ -72,9 +72,9 @@ services:
     networks:
       - loki
 
-  # ===== Storage Service: MinIO Object Storage =====
+  # ===== MinIO Service Configuration =====
   minio:
-    image: minio/minio:${MINIO_VERSION:-RELEASE.2025-09-07T16-13-09Z-cpuv1}
+    image: minio/minio:${MINIO_VERSION:-latest}
     entrypoint:
       - sh
       - -euc
@@ -83,14 +83,14 @@ services:
         mkdir -p /data/loki-ruler && \
         minio server /data
     environment:
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-loki}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-supersecret}
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
       - MINIO_PROMETHEUS_AUTH_TYPE=public
       - MINIO_UPDATE=off
     ports:
       - 9000
     volumes:
-      - minio_data:/data
+      - data_minio:/data
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
       interval: 15s
@@ -99,15 +99,50 @@ services:
     networks:
       - loki
 
-  # ===== Visualization Service: Grafana =====
+  # ===== Node Exporter Service Configuration =====
+  node-exporter:
+    image: prom/node-exporter:${NODE_EXPORTER_VERSION:-latest}
+    container_name: node-exporter
+    restart: always
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+    ports:
+      - "9100:9100"
+    networks:
+      - loki
+
+  # ===== Prometheus Service Configuration =====
+  prometheus:
+    image: prom/prometheus:${PROMETHEUS_VERSION:-latest}
+    container_name: prometheus
+    restart: always
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-remote-write-receiver'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - loki
+
   grafana:
-    image: grafana/grafana:${GRAFANA_VERSION:-13.1.0}
+    image: grafana/grafana:${GRAFANA_VERSION}
     environment:
       - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
     depends_on:
       - gateway
+      - prometheus
     entrypoint:
       - sh
       - -euc
@@ -124,6 +159,11 @@ services:
               httpHeaderName1: "X-Scope-OrgID"
             secureJsonData:
               httpHeaderValue1: "tenant1"
+          - name: Prometheus
+            type: prometheus
+            access: proxy
+            url: http://prometheus:9090
+            isDefault: false
         EOF
         /run.sh
     ports:
@@ -136,20 +176,16 @@ services:
     networks:
       - loki
 
-  # ===== Backend Service: Index store (Service Discovery - compatible) =====
+  # ===== Grafana Loki Distributed Service Configuration =====
   backend:
-    image: grafana/loki:${LOKI_VERSION:-3.7.3}
-    environment:
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-loki}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-supersecret}
+    image: grafana/loki:${LOKI_VERSION:-latest}
     volumes:
       - ./config/loki-config.yaml:/etc/loki/config.yaml
     ports:
       - "3100"
       - "7946"
-    command: "-config.file=/etc/loki/config.yaml -config.expand-env=true -target=backend -legacy-read-mode=false"
+    command: "-config.file=/etc/loki/config.yaml -target=backend -legacy-read-mode=false"
     depends_on:
-      - minio
       - gateway
     healthcheck:
       test: [ "CMD", "/usr/bin/loki", "-health" ]
@@ -159,10 +195,10 @@ services:
       retries: 5
     networks:
       - loki
-
-  # ===== Ingress Service: Nginx (Loki Service Discovery) =====
+    
+  # ===== Nginx Gateway Service Configuration =====
   gateway:
-    image: nginx:${NGINX_VERSION:-1.27.4-alpine}
+    image: nginx:${NGINX_VERSION:-latest}
     depends_on:
       - read
       - write
@@ -229,13 +265,13 @@ services:
       retries: 5
     networks:
       - loki
-
-  # ===== Test Service: Flog (Log Generator) =====
+  
+  # ===== Flog Service Configuration =====
   flog:
-    image: mingrammer/flog:${FLOG_VERSION:-0.4.3}
+    image: mingrammer/flog:${FLOG_VERSION:-latest}
     command: -f json -d 200ms -l
     networks:
       - loki
 
 volumes:
-  minio_data:
+  data_minio:
