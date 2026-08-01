@@ -1,3 +1,8 @@
+# ============================================================================
+# file: loki-config.yaml
+# Description: Grafana Loki distributed service configuration.
+# ============================================================================
+
 ---
 server:
   http_listen_address: 0.0.0.0

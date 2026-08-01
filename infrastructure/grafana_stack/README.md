@@ -59,8 +59,8 @@ cp .env.example .env
 Open the `.env` file and set the MinIO root credentials:
 ```env
 # MinIO root access configurations
-MINIO_ROOT_USER=loki
-MINIO_ROOT_PASSWORD=supersecret
+MINIO_ROOT_USER=${MINIO_ROOT_USER}
+MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
 ```
 
 ### 3. Startup & Operations
