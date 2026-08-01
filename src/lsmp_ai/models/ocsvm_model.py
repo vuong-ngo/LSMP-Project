@@ -1,3 +1,9 @@
+# ============================================================================
+# file: models/ocsvm_model.py
+# Description: Implementation of One-Class SVM model for anomaly detection in LSMP.
+# ============================================================================
+
+# ===== IMPORT MODULES =====
 import joblib
 import numpy as np
 import pandas as pd
@@ -8,6 +14,7 @@ from lsmp_ai.models.base_model import BaseModel
 from lsmp_ai.common.logger import logger
 from lsmp_ai.common.config_loader import config
 
+# ===== OCSVM Model Class =====
 class OCSVMModel(BaseModel):
     """One-Class Support Vector Machine (OCSVM) implementation for anomaly detection in LSMP.
 
@@ -43,8 +50,14 @@ class OCSVMModel(BaseModel):
         self.params = all_params
         self.model = OneClassSVM(**self.params)
 
+    # Maximum training samples for OCSVM to prevent O(n²)-O(n³) compute explosion
+    MAX_TRAIN_SAMPLES = 50000
+
     def fit(self, X: Union[pd.DataFrame, np.ndarray], y: Any = None) -> 'OCSVMModel':
         """Fits the One-Class SVM model on normal behavioral features.
+
+        If the training data exceeds MAX_TRAIN_SAMPLES, a random subsample is used
+        to prevent excessive training time (OCSVM has O(n²)-O(n³) complexity).
 
         Args:
             X (Union[pd.DataFrame, np.ndarray]): The input feature matrix of shape 
@@ -54,6 +67,16 @@ class OCSVMModel(BaseModel):
         Returns:
             OCSVMModel: The fitted model instance (self).
         """
+        n_samples = len(X) if hasattr(X, '__len__') else X.shape[0]
+        if n_samples > self.MAX_TRAIN_SAMPLES:
+            logger.warning(
+                f"OCSVM training data ({n_samples:,} samples) exceeds limit ({self.MAX_TRAIN_SAMPLES:,}). "
+                f"Subsampling to {self.MAX_TRAIN_SAMPLES:,} samples to prevent O(n²) compute explosion."
+            )
+            rng = np.random.RandomState(42)
+            indices = rng.choice(n_samples, size=self.MAX_TRAIN_SAMPLES, replace=False)
+            X = X.iloc[indices] if isinstance(X, pd.DataFrame) else X[indices]
+
         logger.info(f"Training One-Class SVM with parameters: {self.params}")
         self.model.fit(X)
         logger.info("One-Class SVM training complete.")
