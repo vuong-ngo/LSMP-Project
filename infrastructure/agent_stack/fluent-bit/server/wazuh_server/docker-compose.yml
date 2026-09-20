@@ -8,7 +8,8 @@ services:
   lsmp-fluent-bit:
     image: fluent/fluent-bit:3.0
     container_name: lsmp-fluent-bit
-    user: root
+    cap_add:
+      - DAC_READ_SEARCH
     restart: always
     environment:
       # Remote host and port of the lsmp-ingest service

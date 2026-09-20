@@ -8,7 +8,8 @@ services:
   lsmp-client-fluent-bit:
     image: fluent/fluent-bit:3.0
     container_name: lsmp-client-fluent-bit
-    user: root
+    cap_add:
+      - DAC_READ_SEARCH
     restart: always
     environment:
       - LOKI_HOST=${LOKI_HOST:-127.0.0.1}
