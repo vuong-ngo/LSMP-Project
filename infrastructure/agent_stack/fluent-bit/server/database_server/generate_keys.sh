@@ -16,6 +16,8 @@ ENV_EXAMPLE="${SCRIPT_DIR}/.env.example"
 TOKEN_ARG=""
 REDIS_PASS_ARG=""
 FORCE_REGEN=false
+EXTRA_DOMAINS=()
+EXTRA_IPS=()
 
 show_help() {
     echo "Usage: bash generate_keys.sh [OPTIONS]"
@@ -23,8 +25,14 @@ show_help() {
     echo "Options:"
     echo "  --token, -t <TOKEN>         Specify a custom INGEST_TOKEN (64-char hex recommended)"
     echo "  --redis-pass, -r <PASS>     Specify a custom REDIS_PASSWORD"
+    echo "  --domain, -d <DOMAIN>       Add extra DNS SAN to TLS cert (repeatable)"
+    echo "  --extra-ip, -i <IP>         Add extra IP SAN to TLS cert (repeatable)"
     echo "  --force, -f                 Force re-generation of TLS certificates and random tokens"
     echo "  --help, -h                  Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  bash generate_keys.sh --domain ingest.example.com --extra-ip 192.168.1.100"
+    echo "  bash generate_keys.sh -d server-b.local -i 10.0.0.5 -i 10.0.0.6"
     exit 0
 }
 
@@ -42,6 +50,14 @@ while [[ $# -gt 0 ]]; do
         --force|-f)
             FORCE_REGEN=true
             shift
+            ;;
+        --domain|-d)
+            EXTRA_DOMAINS+=("$2")
+            shift 2
+            ;;
+        --extra-ip|-i)
+            EXTRA_IPS+=("$2")
+            shift 2
             ;;
         --help|-h)
             show_help
@@ -107,6 +123,27 @@ else
     echo "🔐 Generating LSMP Ingest Server Private Key (lsmp_ingest.key)..."
     openssl genrsa -out "${CERTS_DIR}/lsmp_ingest.key" 2048 2>/dev/null
 
+    # Build SAN config with base entries + any extra domains/IPs
+    SAN_CONTENT="[alt_names]
+DNS.1 = localhost
+DNS.2 = lsmp-ingest
+IP.1  = 127.0.0.1
+IP.2  = 0.0.0.0"
+
+    DNS_IDX=3
+    for domain in "${EXTRA_DOMAINS[@]}"; do
+        SAN_CONTENT="${SAN_CONTENT}
+DNS.${DNS_IDX} = ${domain}"
+        DNS_IDX=$((DNS_IDX + 1))
+    done
+
+    IP_IDX=3
+    for ip in "${EXTRA_IPS[@]}"; do
+        SAN_CONTENT="${SAN_CONTENT}
+IP.${IP_IDX} = ${ip}"
+        IP_IDX=$((IP_IDX + 1))
+    done
+
     cat <<EOF > "${CERTS_DIR}/san.cnf"
 [req]
 default_bits       = 2048
@@ -126,11 +163,7 @@ CN = lsmp-ingest
 [req_ext]
 subjectAltName = @alt_names
 
-[alt_names]
-DNS.1 = localhost
-DNS.2 = lsmp-ingest
-IP.1  = 127.0.0.1
-IP.2  = 0.0.0.0
+${SAN_CONTENT}
 EOF
 
     openssl req -new -key "${CERTS_DIR}/lsmp_ingest.key" \
