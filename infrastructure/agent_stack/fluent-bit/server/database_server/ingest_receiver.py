@@ -7,6 +7,7 @@ import os
 import sys
 import json
 import ssl
+import hmac
 import logging
 import redis
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -53,7 +54,7 @@ class IngestHandler(BaseHTTPRequestHandler):
         # auth like Redis AUTH, so we implement this layer since the endpoint
         # is exposed over the network.
         token = self.headers.get("X-Ingest-Token")
-        if token != INGEST_TOKEN:
+        if not token or not hmac.compare_digest(token, INGEST_TOKEN):
             logger.warning(f"Rejected invalid request from {self.address_string()} (missing or incorrect token).")
             self.send_response(401)
             self.end_headers()
