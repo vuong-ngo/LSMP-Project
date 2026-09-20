@@ -12,15 +12,16 @@ services:
     ports:
       - "5432:5432"
     environment:
-      - POSTGRES_USER=${POSTGRES_USER:-postgres}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_USER=${POSTGRES_USER:?POSTGRES_USER is not set. Copy .env.example to .env and configure credentials.}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set. Copy .env.example to .env and configure credentials.}
       - POSTGRES_DB=${POSTGRES_DB:-lsmp_db}
       - PGDATA=/var/lib/postgresql/data/pgdata
     volumes:
       # Storage data
       - postgresql_data:/var/lib/postgresql/data
-      # Init database
-      - ./schema.sql:/docker-entrypoint-initdb.d/init.sql
+      # Init database (executed in alphabetical order on first run)
+      - ./schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+      - ./grant_least_privilege.sql:/docker-entrypoint-initdb.d/02_grant_least_privilege.sql
     networks:
       - lsmp_backend
     command: >
@@ -36,6 +37,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
 
 networks:
   lsmp_backend:
