@@ -12,10 +12,11 @@ services:
   read:
     image: grafana/loki:${LOKI_VERSION:-latest}
     command: "-config.file=/etc/loki/config.yaml -target=read"
-    ports:
-      - 3101:3100
-      - 7946
-      - 9095
+    restart: unless-stopped
+    expose:
+      - "3100"
+      - "7946"
+      - "9095"
     volumes:
       - ./config/loki-config.yaml:/etc/loki/config.yaml
     depends_on:
@@ -35,10 +36,11 @@ services:
   write:
     image: grafana/loki:${LOKI_VERSION:-latest}
     command: "-config.file=/etc/loki/config.yaml -target=write"
-    ports:
-      - 3102:3100
-      - 7946
-      - 9095
+    restart: unless-stopped
+    expose:
+      - "3100"
+      - "7946"
+      - "9095"
     volumes:
       - ./config/loki-config.yaml:/etc/loki/config.yaml
     healthcheck:
@@ -56,6 +58,7 @@ services:
   alloy:
     image: grafana/alloy:${ALLOY_VERSION:-latest}
     container_name: alloy
+    restart: unless-stopped
     pid: host
     volumes:
       - ./config/alloy-local-config.yaml:/etc/alloy/config.alloy:ro
@@ -65,8 +68,8 @@ services:
       - /:/host/root:ro
       - /var/log:/var/log:ro
     command: run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
-    ports:
-      - 12345:12345
+    expose:
+      - "12345"
     depends_on:
       - gateway
     networks:
@@ -75,6 +78,7 @@ services:
   # ===== MinIO Service Configuration =====
   minio:
     image: minio/minio:${MINIO_VERSION:-latest}
+    restart: unless-stopped
     entrypoint:
       - sh
       - -euc
@@ -87,8 +91,8 @@ services:
       - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
       - MINIO_PROMETHEUS_AUTH_TYPE=public
       - MINIO_UPDATE=off
-    ports:
-      - 9000
+    expose:
+      - "9000"
     volumes:
       - data_minio:/data
     healthcheck:
@@ -113,8 +117,8 @@ services:
       - '--path.procfs=/host/proc'
       - '--path.sysfs=/host/sys'
       - '--path.rootfs=/rootfs'
-    ports:
-      - "9100:9100"
+    expose:
+      - "9100"
     networks:
       - loki
 
@@ -127,8 +131,8 @@ services:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
       - '--web.enable-remote-write-receiver'
-    ports:
-      - "9090:9090"
+    expose:
+      - "9090"
     volumes:
       - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     networks:
@@ -136,36 +140,16 @@ services:
 
   grafana:
     image: grafana/grafana:${GRAFANA_VERSION}
+    restart: unless-stopped
     environment:
       - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
       - GF_AUTH_ANONYMOUS_ENABLED=true
-      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
     depends_on:
       - gateway
       - prometheus
-    entrypoint:
-      - sh
-      - -euc
-      - |
-        mkdir -p /etc/grafana/provisioning/datasources
-        cat <<EOF > /etc/grafana/provisioning/datasources/ds.yaml
-        apiVersion: 1
-        datasources:
-          - name: Loki
-            type: loki
-            access: proxy
-            url: http://gateway:3100
-            jsonData:
-              httpHeaderName1: "X-Scope-OrgID"
-            secureJsonData:
-              httpHeaderValue1: "tenant1"
-          - name: Prometheus
-            type: prometheus
-            access: proxy
-            url: http://prometheus:9090
-            isDefault: false
-        EOF
-        /run.sh
+    volumes:
+      - ./config/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/ds.yaml:ro
     ports:
       - "3000:3000"
     healthcheck:
@@ -179,9 +163,10 @@ services:
   # ===== Grafana Loki Distributed Service Configuration =====
   backend:
     image: grafana/loki:${LOKI_VERSION:-latest}
+    restart: unless-stopped
     volumes:
       - ./config/loki-config.yaml:/etc/loki/config.yaml
-    ports:
+    expose:
       - "3100"
       - "7946"
     command: "-config.file=/etc/loki/config.yaml -target=backend -legacy-read-mode=false"
@@ -199,63 +184,12 @@ services:
   # ===== Nginx Gateway Service Configuration =====
   gateway:
     image: nginx:${NGINX_VERSION:-latest}
+    restart: unless-stopped
     depends_on:
       - read
       - write
-    entrypoint:
-      - sh
-      - -euc
-      - |
-        cat <<EOF > /etc/nginx/nginx.conf
-        user  nginx;
-        worker_processes  5;  ## Default: 1
-
-        events {
-          worker_connections   1000;
-        }
-
-        http {
-          resolver 127.0.0.11;
-
-          server {
-            listen             3100;
-
-            location = / {
-              return 200 'OK';
-              auth_basic off;
-            }
-
-            location = /api/prom/push {
-              proxy_pass       http://write:3100\$$request_uri;
-            }
-
-            location = /api/prom/tail {
-              proxy_pass       http://read:3100\$$request_uri;
-              proxy_set_header Upgrade \$$http_upgrade;
-              proxy_set_header Connection "upgrade";
-            }
-
-            location ~ /api/prom/.* {
-              proxy_pass       http://read:3100\$$request_uri;
-            }
-
-            location = /loki/api/v1/push {
-              proxy_pass       http://write:3100\$$request_uri;
-            }
-
-            location = /loki/api/v1/tail {
-              proxy_pass       http://read:3100\$$request_uri;
-              proxy_set_header Upgrade \$$http_upgrade;
-              proxy_set_header Connection "upgrade";
-            }
-
-            location ~ /loki/api/.* {
-              proxy_pass       http://read:3100\$$request_uri;
-            }
-          }
-        }
-        EOF
-        /docker-entrypoint.sh nginx -g "daemon off;"
+    volumes:
+      - ./config/nginx.conf:/etc/nginx/nginx.conf:ro
     ports:
       - "3100:3100"
     healthcheck:
@@ -269,6 +203,7 @@ services:
   # ===== Flog Service Configuration =====
   flog:
     image: mingrammer/flog:${FLOG_VERSION:-latest}
+    restart: unless-stopped
     command: -f json -d 200ms -l
     networks:
       - loki
