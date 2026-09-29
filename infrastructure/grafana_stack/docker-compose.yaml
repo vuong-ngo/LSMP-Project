@@ -67,6 +67,7 @@ services:
       - /sys:/host/sys:ro
       - /:/host/root:ro
       - /var/log:/var/log:ro
+      - /run/udev:/run/udev:ro
     command: run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
     expose:
       - "12345"

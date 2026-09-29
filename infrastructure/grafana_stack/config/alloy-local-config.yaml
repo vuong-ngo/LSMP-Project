@@ -50,7 +50,7 @@ loki.source.docker "flog_scrape" {
 
 // 5. Host Auth Log Collection (/var/log/auth.log)
 local.file_match "auth_log_files" {
-  paths = ["/var/log/auth.log"]
+  path_targets = [{"__path__" = "/var/log/auth.log"}]
 }
 
 loki.source.file "auth_logs" {
