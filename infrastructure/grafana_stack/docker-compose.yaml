@@ -1,14 +1,18 @@
 # ============================================================================
 # file: docker-compose.yaml
-# description: Docker Compose file for setting up Grafana Loki distributed service.
+# Description: Docker Compose configuration for Grafana Loki distributed stack.
+#              Includes Loki Read/Write/Backend, MinIO, Prometheus, Node Exporter,
+#              Grafana, Alloy, and Nginx Gateway with TLS.
 # ============================================================================
 
 ---
+# ====== Networks Configuration ======
 networks:
   loki:
 
+# ====== Services Configuration ======
 services:
-  # ===== Grafana Loki Distributed Service Configuration =====
+  # ====== Loki Read Service (Query Engine) ======
   read:
     image: grafana/loki:${LOKI_VERSION:-latest}
     command: "-config.file=/etc/loki/config.yaml -target=read"
@@ -32,7 +36,7 @@ services:
         aliases:
           - loki
 
-  # ===== Grafana Loki Distributed Service Configuration =====
+  # ====== Loki Write Service (Ingester & Distributor) ======
   write:
     image: grafana/loki:${LOKI_VERSION:-latest}
     command: "-config.file=/etc/loki/config.yaml -target=write"
@@ -54,7 +58,7 @@ services:
     networks:
       <<: *loki-dns
 
-  # ===== Grafana Alloy Service Configuration =====
+  # ====== Grafana Alloy (Telemetry Collector & Shipper) ======
   alloy:
     image: grafana/alloy:${ALLOY_VERSION:-v1.2.1}
     container_name: alloy
@@ -76,7 +80,7 @@ services:
     networks:
       - loki
 
-  # ===== MinIO Service Configuration =====
+  # ====== MinIO (S3 Object Storage for Loki Chunks & Indexes) ======
   minio:
     image: quay.io/minio/minio:${MINIO_VERSION:-RELEASE.2024-06-06T09-36-42Z}
     restart: unless-stopped
@@ -104,7 +108,7 @@ services:
     networks:
       - loki
 
-  # ===== Node Exporter Service Configuration =====
+  # ====== Node Exporter (Host System Metrics Exporter) ======
   node-exporter:
     image: prom/node-exporter:${NODE_EXPORTER_VERSION:-v1.8.0}
     container_name: node-exporter
@@ -123,7 +127,7 @@ services:
     networks:
       - loki
 
-  # ===== Prometheus Service Configuration =====
+  # ====== Prometheus Server (Metrics Collection & Storage) ======
   prometheus:
     image: prom/prometheus:${PROMETHEUS_VERSION:-v2.51.1}
     container_name: prometheus
@@ -139,6 +143,7 @@ services:
     networks:
       - loki
 
+  # ====== Grafana (Visualization Platform & Dashboards) ======
   grafana:
     image: grafana/grafana:${GRAFANA_VERSION}
     restart: unless-stopped
@@ -161,7 +166,7 @@ services:
     networks:
       - loki
 
-  # ===== Grafana Loki Distributed Service Configuration =====
+  # ====== Loki Backend Service (Compactor, Ruler & Index Gateway) ======
   backend:
     image: grafana/loki:${LOKI_VERSION:-latest}
     restart: unless-stopped
@@ -182,7 +187,7 @@ services:
     networks:
       - loki
     
-  # ===== Nginx Gateway Service Configuration =====
+  # ====== Nginx Gateway (Reverse Proxy & TLS Termination) ======
   gateway:
     image: nginx:${NGINX_VERSION:-latest}
     restart: unless-stopped
@@ -202,7 +207,7 @@ services:
     networks:
       - loki
   
-  # ===== Flog Service Configuration =====
+  # ====== Flog (Synthetic Log Generator for Testing) ======
   flog:
     image: mingrammer/flog:${FLOG_VERSION:-latest}
     restart: unless-stopped
@@ -210,5 +215,6 @@ services:
     networks:
       - loki
 
+# ====== Persistent Storage Volumes ======
 volumes:
   data_minio:

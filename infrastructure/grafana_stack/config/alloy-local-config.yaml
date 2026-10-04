@@ -4,27 +4,27 @@
 //              and Remote Writing to Prometheus Server + Shipping Logs to Loki.
 // ============================================================================
 
-// 1. Define Host Metrics Exporter (Node / Unix Exporter)
+// ====== Host Metrics Exporter (Node / Unix Exporter) ======
 prometheus.exporter.unix "host" {
   procfs_path = "/host/proc"
   sysfs_path  = "/host/sys"
   rootfs_path = "/host/root"
 }
 
-// 2. Scrape Unix Exporter Targets inside Alloy
+// ====== Scrape Unix Exporter Targets inside Alloy ======
 prometheus.scrape "host_scrape" {
   targets    = prometheus.exporter.unix.host.targets
   forward_to = [prometheus.remote_write.default.receiver]
 }
 
-// 3. Remote Write metrics directly to Prometheus Server
+// ====== Remote Write Metrics to Prometheus Server ======
 prometheus.remote_write "default" {
   endpoint {
     url = "http://prometheus:9090/api/v1/write"
   }
 }
 
-// 4. Docker Container Log Ingestion (Loki Source)
+// ====== Docker Container Log Discovery & Relabeling ======
 discovery.docker "flog_scrape" {
   host             = "unix:///var/run/docker.sock"
   refresh_interval = "5s"
@@ -40,6 +40,7 @@ discovery.relabel "flog_scrape" {
   }
 }
 
+// ====== Docker Container Log Source (Loki Source) ======
 loki.source.docker "flog_scrape" {
   host             = "unix:///var/run/docker.sock"
   targets          = discovery.docker.flog_scrape.targets
@@ -48,16 +49,18 @@ loki.source.docker "flog_scrape" {
   refresh_interval = "5s"
 }
 
-// 5. Host Auth Log Collection (/var/log/auth.log)
+// ====== Host Auth Log File Matcher (/var/log/auth.log) ======
 local.file_match "auth_log_files" {
   path_targets = [{"__path__" = "/var/log/auth.log"}]
 }
 
+// ====== Host Auth Log Source (Loki Source) ======
 loki.source.file "auth_logs" {
   targets    = local.file_match.auth_log_files.targets
   forward_to = [loki.write.default.receiver]
 }
 
+// ====== Loki Remote Write Receiver ======
 loki.write "default" {
   endpoint {
     url       = "http://gateway:3100/loki/api/v1/push"
