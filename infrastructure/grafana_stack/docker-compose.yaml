@@ -191,6 +191,7 @@ services:
       - write
     volumes:
       - ./config/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
     ports:
       - "3100:3100"
     healthcheck:
