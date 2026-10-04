@@ -15,6 +15,7 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 GRAFANA_STACK_DIR="${PROJECT_ROOT}/grafana_stack"
 OUTPUT_CERTS_DIR="${SCRIPT_DIR}/loki_gateway_certs"
 
+# ====== CLI Arguments & Options ======
 EXTRA_IPS=()
 EXTRA_DOMAINS=()
 
@@ -40,7 +41,7 @@ echo "================================================================="
 
 mkdir -p "${CLIENT_CERTS_DIR}" "${OUTPUT_CERTS_DIR}"
 
-# 1. Locate or Generate Root CA
+# ====== Step 1: Locate or Generate Root CA ======
 CA_KEY=""
 CA_CRT=""
 
@@ -66,7 +67,7 @@ fi
 cp -f "${CA_CRT}" "${CLIENT_CERTS_DIR}/ca.crt"
 cp -f "${CA_CRT}" "${OUTPUT_CERTS_DIR}/ca.crt"
 
-# 2. Collect host IPs automatically
+# ====== Step 2: Auto-detect Host IP Addresses ======
 DETECTED_IPS=$(hostname -I 2>/dev/null || ip addr show 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || echo "127.0.0.1")
 for ip in ${DETECTED_IPS}; do
     if [[ ! " ${EXTRA_IPS[*]} " =~ " ${ip} " ]] && [[ "${ip}" != "127.0.0.1" ]]; then
@@ -74,7 +75,7 @@ for ip in ${DETECTED_IPS}; do
     fi
 done
 
-# 3. Generate Loki Gateway Server Key & CSR
+# ====== Step 3: Generate Loki Gateway Server Key & CSR ======
 echo "🔐 Generating Loki Gateway Private Key (loki_gateway.key)..."
 openssl genrsa -out "${OUTPUT_CERTS_DIR}/loki_gateway.key" 2048 2>/dev/null
 
@@ -134,7 +135,7 @@ rm -f "${OUTPUT_CERTS_DIR}/loki_gateway.csr" "${OUTPUT_CERTS_DIR}/san.cnf"
 chmod 644 "${OUTPUT_CERTS_DIR}"/*.crt 2>/dev/null || true
 chmod 600 "${OUTPUT_CERTS_DIR}"/*.key 2>/dev/null || true
 
-# 4. Verification
+# ====== Step 4: Verification ======
 echo "🔍 Verifying generated certificate against Root CA..."
 if openssl verify -CAfile "${CA_CRT}" "${OUTPUT_CERTS_DIR}/loki_gateway.crt" >/dev/null 2>&1; then
     echo "✅ Certificate chain is 100% VALID!"
@@ -142,6 +143,8 @@ else
     echo "❌ Error: Certificate verification failed!"
     exit 1
 fi
+
+# ====== Step 5: Output Summary ======
 
 echo "================================================================="
 echo "✅ LOKI GATEWAY TLS CERTIFICATES READY!"

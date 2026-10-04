@@ -1,10 +1,12 @@
 # ============================================================================
 # file: database_server/docker-compose.yml
-# Description: Runs on DATABASE & AI SERVER (Server B).
+# Description: Docker Compose for Ingestion Stack on Database & AI Server (Server B).
+#              Runs Redis stream buffer, HTTP ingest receiver, and Postgres DB writer.
 # ============================================================================
 
+# ====== Ingestion Services ======
 services:
-  # ===== Redis: Buffer queue (Stream) =====
+  # ====== Redis: Buffer Queue (Stream) ======
   lsmp-redis:
     image: redis:7.2-alpine
     container_name: lsmp-redis
@@ -20,7 +22,7 @@ services:
       timeout: 3s
       retries: 5
 
-  # ===== Ingest Receiver: HTTP (from Fluent Bit on Server A) -> Redis XADD =====
+  # ====== Ingest Receiver: HTTP (from Server A) -> Redis XADD ======
   lsmp-ingest:
     build:
       context: .
@@ -50,7 +52,7 @@ services:
       lsmp-redis:
         condition: service_healthy
 
-  # ===== Database Writer: Redis Consume -> Postgres Batch Insert =====
+  # ====== Database Writer: Redis Consume -> Postgres Batch Insert ======
   lsmp-db-writer:
     build:
       context: .
@@ -72,9 +74,11 @@ services:
       lsmp-redis:
         condition: service_healthy
 
+# ====== Networks Configuration ======
 networks:
   lsmp_backend:
     external: true
 
+# ====== Persistent Volumes ======
 volumes:
   redis_data:

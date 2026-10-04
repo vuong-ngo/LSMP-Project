@@ -1,3 +1,9 @@
+# ============================================================================
+# file: fluent-bit.conf.bak
+# Description: Default backup configuration template for Fluent Bit.
+# ============================================================================
+
+# ====== Service Configuration ======
 [SERVICE]
     # Flush
     # =====
@@ -81,6 +87,7 @@
     #
     # storage.backlog.mem_limit 5M
 
+# ====== Input Plugin ======
 [INPUT]
     name cpu
     tag  cpu.local
@@ -88,6 +95,7 @@
     # Read interval (sec) Default: 1
     interval_sec 1
 
+# ====== Output Plugin ======
 [OUTPUT]
     name  stdout
     match *

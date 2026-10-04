@@ -1,10 +1,12 @@
 # ============================================================================
 # file: docker-compose.yml
-# description: Docker Compose configuration for Fluent-bit client agent. Sole agent to monitor host logs and ship to Loki and Wazuh Manager.
+# Description: Docker Compose configuration for Fluent-bit client agent.
+#              Sole agent to monitor host logs and ship to Loki and Wazuh Manager.
 # ============================================================================
 
+# ====== Fluent-Bit Client Service ======
 services:
-  # ===== Fluent-Bit: Sole agent to forward logs to Loki & Wazuh Manager =====
+  # ====== Fluent-Bit Container: Forward Logs to Loki & Wazuh Manager ======
   lsmp-client-fluent-bit:
     image: fluent/fluent-bit:3.0
     container_name: lsmp-client-fluent-bit
@@ -34,5 +36,6 @@ services:
       # Persistent volume to store file tail offsets (avoids duplicates on restart)
       - fluent_bit_db:/fluent-bit/db/
 
+# ====== Persistent Volumes ======
 volumes:
   fluent_bit_db:

@@ -1,2 +1,8 @@
+# ============================================================================
+# file: plugins.conf.bak
+# Description: Default backup external plugins configuration for Fluent Bit.
+# ============================================================================
+
+# ====== External Plugins Configuration ======
 [PLUGINS]
     # Path /path/to/out_gstdout.so

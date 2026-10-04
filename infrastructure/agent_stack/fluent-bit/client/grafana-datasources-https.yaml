@@ -1,5 +1,13 @@
+# ============================================================================
+# file: grafana-datasources-https.yaml
+# Description: Grafana datasource configuration for Loki (HTTPS) and Prometheus.
+# ============================================================================
+
 apiVersion: 1
+
+# ====== Grafana Data Sources Configuration ======
 datasources:
+  # ====== Loki Data Source (HTTPS with TLS Skip Verify) ======
   - name: Loki
     type: loki
     access: proxy
@@ -9,6 +17,8 @@ datasources:
       httpHeaderName1: "X-Scope-OrgID"
     secureJsonData:
       httpHeaderValue1: "tenant1"
+
+  # ====== Prometheus Data Source (Internal Metrics) ======
   - name: Prometheus
     type: prometheus
     access: proxy
