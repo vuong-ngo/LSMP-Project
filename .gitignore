@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+infrastructure/agent_stack/fluent-bit/client/certs/
+infrastructure/agent_stack/fluent-bit/client/loki_gateway_certs/
+*.key
+*.crt
