@@ -34,19 +34,19 @@ TABLE_AGENTS = "agents"  # not in current schema but kept for compat
 DEFAULT_MODEL_VERSION = "cascade-v1.0"
 
 FEATURE_COLUMNS = [
-    "login_fail_count",
-    "unique_failed_ip_count",
-    "fail_success_ratio",
-    "ip_entropy",
-    "hour_of_day",
-    "request_rate",
-    "status_4xx_rate",
-    "url_frequency",
-    "user_agent_entropy",
-    "method_distribution",
-    "time_window_count",
-    "burst_rate",
-    "sliding_window_count",
-    "ip_switch_frequency"
+    "auth_fail_count",
+    "auth_success_count",
+    "auth_fail_ratio",
+    "distinct_username",
+    "fail_interarrival_mean",
+    "fail_interarrival_std",
+    "http_req_rate",
+    "http_4xx_ratio",
+    "http_5xx_ratio",
+    "http_post_ratio",
+    "distinct_user_agent",
+    "bytes_sent_mean",
+    "global_active_ips",
+    "burst_rate"
 ]
 
