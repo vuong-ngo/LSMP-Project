@@ -1,11 +1,20 @@
+# ============================================================================
+# file: Dockerfile.ingest
+# Description: Dockerfile for LSMP Ingest Receiver service (HTTP -> Redis Stream).
+# ============================================================================
+
+# ====== Base Image & Working Directory ======
 FROM python:3.11-slim
 
 WORKDIR /app
 
+# ====== Python Dependencies ======
 RUN pip install --no-cache-dir redis==5.0.1
 
+# ====== Application Code ======
 COPY ingest_receiver.py /app/ingest_receiver.py
 
+# ====== Port Exposure & Execution ======
 EXPOSE 8080
 
 CMD ["python", "ingest_receiver.py"]

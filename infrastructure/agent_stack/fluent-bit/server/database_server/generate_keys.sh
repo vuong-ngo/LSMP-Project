@@ -13,12 +13,14 @@ CERTS_DIR="${SCRIPT_DIR}/certs"
 ENV_FILE="${SCRIPT_DIR}/.env"
 ENV_EXAMPLE="${SCRIPT_DIR}/.env.example"
 
+# ====== Default Parameters & State ======
 TOKEN_ARG=""
 REDIS_PASS_ARG=""
 FORCE_REGEN=false
 EXTRA_DOMAINS=()
 EXTRA_IPS=()
 
+# ====== Help & Usage Information ======
 show_help() {
     echo "Usage: bash generate_keys.sh [OPTIONS]"
     echo ""
@@ -36,7 +38,7 @@ show_help() {
     exit 0
 }
 
-# Parse CLI flags
+# ====== Parse CLI Arguments ======
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --token|-t)
@@ -75,7 +77,7 @@ echo "================================================================="
 
 mkdir -p "${CERTS_DIR}"
 
-# 1. Determine INGEST_TOKEN and REDIS_PASSWORD
+# ====== Step 1: Determine Secrets & Passwords ======
 INGEST_TOKEN=""
 REDIS_PASSWORD=""
 
@@ -109,7 +111,7 @@ if [ -z "${REDIS_PASSWORD}" ]; then
     REDIS_PASSWORD=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 24)
 fi
 
-# 2. TLS Certificates Generation
+# ====== Step 2: TLS Certificates Generation ======
 if [ "${FORCE_REGEN}" = false ] && [ -f "${CERTS_DIR}/ca.crt" ] && [ -f "${CERTS_DIR}/ca.key" ] && [ -f "${CERTS_DIR}/lsmp_ingest.crt" ] && [ -f "${CERTS_DIR}/lsmp_ingest.key" ]; then
     echo "✅ Existing TLS Certificates found in ${CERTS_DIR}. Skipping certificate generation."
     echo "   (Use --force or -f to regenerate certificates)"
@@ -183,7 +185,7 @@ fi
 chmod 600 "${CERTS_DIR}"/*.key 2>/dev/null || true
 chmod 644 "${CERTS_DIR}"/*.crt 2>/dev/null || true
 
-# 3. Create or Update .env file for Database Server
+# ====== Step 3: Configure Environment File (.env) ======
 echo "⚙️  Updating environment file (${ENV_FILE})..."
 if [ ! -f "${ENV_FILE}" ]; then
     if [ -f "${ENV_EXAMPLE}" ]; then
@@ -218,6 +220,8 @@ if grep -q "^USE_TLS=" "${ENV_FILE}"; then
 else
     echo "USE_TLS=true" >> "${ENV_FILE}"
 fi
+
+# ====== Step 4: Display Summary & Instructions ======
 
 echo "================================================================="
 echo "✅ DATABASE SERVER SECURITY KEYS SUCCESSFULLY CONFIGURED!"
