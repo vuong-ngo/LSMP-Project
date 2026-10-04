@@ -3,8 +3,9 @@ datasources:
   - name: Loki
     type: loki
     access: proxy
-    url: http://gateway:3100
+    url: https://gateway:3100
     jsonData:
+      tlsSkipVerify: true
       httpHeaderName1: "X-Scope-OrgID"
     secureJsonData:
       httpHeaderValue1: "tenant1"
