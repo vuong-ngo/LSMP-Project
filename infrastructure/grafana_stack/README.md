@@ -28,7 +28,7 @@ infrastructure/grafana_stack/
 
 ## 🏛 Distributed Log Architecture
 
-The log ingestion and querying system is built on a distributed **Grafana Loki** setup behind an Nginx reverse proxy gateway, backed by **MinIO** object storage.
+The log ingestion and querying system is built on a distributed **Grafana Loki** setup behind an Nginx reverse proxy gateway, backed by **SeaweedFS** object storage.
 
 | Service | Role | Exposed Port |
 |---|---|---|
@@ -36,7 +36,7 @@ The log ingestion and querying system is built on a distributed **Grafana Loki**
 | **write** | Ingests, indexes, and batches incoming log lines | Internal only |
 | **read** | Executes LogQL queries and aggregates results | Internal only |
 | **backend** | Manages compaction and index storage | Internal only |
-| **minio** | S3-compatible storage for log chunks | Internal only |
+| **seaweedfs** | S3-compatible storage for log chunks | `8888` (Filer UI) |
 | **grafana** | Visualization dashboard with Loki + Prometheus datasources | `3000` (host) |
 | **prometheus** | Metrics scraping and storage | Internal only |
 | **node-exporter** | Host system metrics collector | Internal only |
