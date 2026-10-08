@@ -30,6 +30,13 @@ services:
       - ./certs:/fluent-bit/certs:ro
       # Persistent volume to store file tail offsets (avoids duplicates on restart)
       - fluent_bit_db:/fluent-bit/db/
+    networks:
+      - lsmp_backend
+
+# ====== Networks Configuration ======
+networks:
+  lsmp_backend:
+    external: true
 
 # ====== Volumes Configuration ======
 volumes:
