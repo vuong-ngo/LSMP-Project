@@ -63,7 +63,7 @@ loki.source.file "auth_logs" {
 // ====== Loki Remote Write Receiver ======
 loki.write "default" {
   endpoint {
-    url       = "http://gateway:3100/loki/api/v1/push"
+    url       = "http://gateway:3101/loki/api/v1/push"
     tenant_id = "tenant1"
   }
   external_labels = {}
