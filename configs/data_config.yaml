@@ -24,8 +24,9 @@ data:
   # Time window for sliding-window feature aggregation (minutes)
   time_window_minutes: 1
 
-  # Train/test split ratio
-  train_test_split_ratio: 0.7
+  # Temporal split ratio matching SME-kit: Train (60%) / Validation (20%) / Test (20%)
+  split: [0.6, 0.2, 0.2]
+  train_test_split_ratio: 0.6
 
   # Database table name mappings (must match schema.sql)
   db_table_wazuh_alerts: "log_event"
@@ -37,7 +38,8 @@ data:
 raw_data_path: "data/raw"
 processed_data_path: "data/processed"
 external_data_path: "data/external"
-train_ratio: 0.7
-test_ratio: 0.3
+train_ratio: 0.6
+val_ratio: 0.2
+test_ratio: 0.2
 window_minutes: 60
 feature_version: "v1"
