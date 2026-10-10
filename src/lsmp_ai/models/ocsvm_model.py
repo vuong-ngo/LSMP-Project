@@ -20,14 +20,8 @@ class OCSVMModel(BaseModel):
     """Production One-Class Support Vector Machine for Stage 2 precision boundary verification.
 
     Attributes:
-<<<<<<< HEAD
-        params (Dict[str, Any]): Dictionary of hyperparameters passed to the 
-            underlying scikit-learn OneClassSVM estimator.
-        model (OneClassSVM): The scikit-learn OneClassSVM instance.
-=======
         params (Dict[str, Any]): Dictionary of model hyperparameters.
         model (OneClassSVM): Underlying scikit-learn OneClassSVM estimator.
->>>>>>> origin/feature/ai-model-ocsvm
     """
 
     MAX_TRAIN_SAMPLES: int = 50000
@@ -43,7 +37,7 @@ class OCSVMModel(BaseModel):
         if params is not None:
             all_params.update(params)
         all_params.update(kwargs)
-        
+
         if not all_params:
             if config and hasattr(config, "ocsvm_params") and config.ocsvm_params:
                 all_params = dict(config.ocsvm_params)
@@ -64,14 +58,8 @@ class OCSVMModel(BaseModel):
         Includes sample capping protection against quadratic complexity blowups.
 
         Args:
-<<<<<<< HEAD
-            X (Union[pd.DataFrame, np.ndarray]): The input feature matrix of shape 
-                (n_samples, n_features) representing the training data.
-            y (Any, optional): Ignored. Included for API consistency with BaseModel.
-=======
             X (Union[pd.DataFrame, np.ndarray]): Input feature matrix.
             y (Any, optional): Ignored. Maintained for interface uniformity.
->>>>>>> origin/feature/ai-model-ocsvm
 
         Returns:
             OCSVMModel: Fitted model instance (self).
@@ -91,25 +79,9 @@ class OCSVMModel(BaseModel):
         self.model.fit(X_arr)
         logger.info("One-Class SVM training complete.")
         return self
-        
+
     def predict(self, X: Union[pd.DataFrame, np.ndarray]) -> np.ndarray:
-<<<<<<< HEAD
-        """Predicts the anomaly labels for the given samples.
-
-        Args:
-            X (Union[pd.DataFrame, np.ndarray]): Input feature matrix to predict.
-
-        Returns:
-            np.ndarray: A 1D array of shape (n_samples,) containing predicted labels. 
-                Returns 1 for normal samples (inliers) and -1 for anomalous samples (outliers).
-        """
-        return self.model.predict(X)
-        
-    def score(self, X: Union[pd.DataFrame, np.ndarray]) -> np.ndarray:
-        """Computes raw decision function anomaly scores for each sample.
-=======
         """Predicts anomaly labels (1 for normal inlier, -1 for anomalous outlier).
->>>>>>> origin/feature/ai-model-ocsvm
 
         Args:
             X (Union[pd.DataFrame, np.ndarray]): Input feature matrix.
@@ -132,9 +104,6 @@ class OCSVMModel(BaseModel):
         X_arr = X.values if isinstance(X, pd.DataFrame) else np.asarray(X)
         scores = self.model.decision_function(X_arr)
         return np.asarray(scores).ravel()
-<<<<<<< HEAD
-        
-=======
 
     def decision_function(self, X: Union[pd.DataFrame, np.ndarray]) -> np.ndarray:
         """Computes scikit-learn decision function."""
@@ -151,7 +120,6 @@ class OCSVMModel(BaseModel):
         """
         return -self.decision_function(X)
 
->>>>>>> origin/feature/ai-model-ocsvm
     def save(self, filepath: str) -> None:
         """Serializes and saves the model binary to disk.
 
@@ -160,7 +128,7 @@ class OCSVMModel(BaseModel):
         """
         joblib.dump(self.model, filepath)
         logger.info(f"Saved One-Class SVM model to {filepath}")
-        
+
     def load(self, filepath: str) -> 'OCSVMModel':
         """Deserializes and restores model state from disk.
 
