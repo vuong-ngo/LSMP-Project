@@ -1,44 +1,35 @@
 # ============================================================================
 # file: models/isolation_forest_model.py
-# Description: Implemenation of Isolation Forest model for anomaly detection in LSMP.
+# Description: Production-ready Isolation Forest model for rapid anomaly screening in LSMP.
+# Based on Liu et al. (2008), Isolation Forest.
 # ============================================================================
+from __future__ import annotations
 
-# ===== IMPORT MODULES =====
 import joblib
 import numpy as np
 import pandas as pd
-from typing import Union, Dict, Any
+from typing import Union, Dict, Any, Optional
 from sklearn.ensemble import IsolationForest
 
 from lsmp_ai.models.base_model import BaseModel
 from lsmp_ai.common.logger import logger
 from lsmp_ai.common.config_loader import config
 
-# ===== Isolation Forest Model =====
-class IsolationForestModel(BaseModel):
-    """Isolation Forest implementation for anomaly detection in LSMP.
 
-    This model isolates anomalies by randomly selecting a feature and then randomly
-    selecting a split value between the maximum and minimum values of the selected feature.
-    Since recursive partitioning can be represented by a tree structure, the number of
-    splittings required to isolate a sample is equivalent to the path length from the
-    root node to the terminating node. This path length, averaged over a forest of such
-    random trees, is a measure of abnormality and our decision function.
+class IsolationForestModel(BaseModel):
+    """Production Isolation Forest anomaly detector for Stage 1 rapid traffic screening.
 
     Attributes:
-        params (Dict[str, Any]): Dictionary of hyperparameters passed to the
-            underlying scikit-learn IsolationForest estimator.
-        model (IsolationForest): The scikit-learn IsolationForest instance.
+        params (Dict[str, Any]): Dictionary of model hyperparameters.
+        model (IsolationForest): Underlying scikit-learn IsolationForest estimator.
     """
 
-    def __init__(self, params: Dict[str, Any] = None, **kwargs):
-        """Initializes the Isolation Forest model.
-
-        Loads defaults from config if not provided, merging with explicit overrides.
+    def __init__(self, params: Optional[Dict[str, Any]] = None, **kwargs):
+        """Initializes IsolationForestModel with configuration defaults and overrides.
 
         Args:
-            params (Dict[str, Any], optional): Dictionary of configurations. Defaults to None.
-            **kwargs: Additional key-value arguments representing hyperparameters to override.
+            params (Dict[str, Any], optional): Hyperparameters dictionary. Defaults to None.
+            **kwargs: Keyword argument overrides for hyperparameters.
         """
         all_params = {}
         if params is not None:
@@ -46,58 +37,89 @@ class IsolationForestModel(BaseModel):
         all_params.update(kwargs)
 
         if not all_params:
-            all_params = config.iforest_params if config else {
-                "n_estimators": 100,
-                "max_samples": "auto",
-                "contamination": 0.05,
-                "random_state": 42
-            }
+            if config and hasattr(config, "iforest_params") and config.iforest_params:
+                all_params = dict(config.iforest_params)
+            else:
+                all_params = {
+                    "n_estimators": 200,
+                    "max_samples": 256,
+                    "contamination": 0.05,
+                    "random_state": 42,
+                    "n_jobs": -1,
+                }
         self.params = all_params
-        self.model = IsolationForest(**self.params)
-
+        valid_keys = {
+            "n_estimators", "max_samples", "contamination", "max_features",
+            "bootstrap", "n_jobs", "random_state", "verbose", "warm_start"
+        }
+        sk_params = {k: v for k, v in self.params.items() if k in valid_keys}
+        self.model = IsolationForest(**sk_params)
 
     def fit(self, X: Union[pd.DataFrame, np.ndarray], y: Any = None) -> 'IsolationForestModel':
-        """Fits the Isolation Forest model on normal behavioral features.
+        """Fits the Isolation Forest estimator on feature data.
 
         Args:
-            X (Union[pd.DataFrame, np.ndarray]): The input feature matrix of shape
-                (n_samples, n_features) representing the training data.
-            y (Any, optional): Ignored. Included for API consistency with BaseModel.
+            X (Union[pd.DataFrame, np.ndarray]): Input feature matrix.
+            y (Any, optional): Ignored. Maintained for interface uniformity.
 
         Returns:
-            IsolationForestModel: The fitted model instance (self).
+            IsolationForestModel: Fitted model instance (self).
         """
+        X_arr = X.values if isinstance(X, pd.DataFrame) else np.asarray(X)
         logger.info(f"Training Isolation Forest with parameters: {self.params}")
-        self.model.fit(X)
+        self.model.fit(X_arr)
         logger.info("Isolation Forest training complete.")
         return self
 
     def predict(self, X: Union[pd.DataFrame, np.ndarray]) -> np.ndarray:
-        """Predicts the anomaly labels for the given samples.
-
-        Args:
-            X (Union[pd.DataFrame, np.ndarray]): Input feature matrix to predict.
-
-        Returns:
-            np.ndarray: A 1D array of shape (n_samples,) containing predicted labels.
-                Returns 1 for normal samples (inliers) and -1 for anomalous samples (outliers).
-        """
-        return self.model.predict(X)
-
-    def score(self, X: Union[pd.DataFrame, np.ndarray]) -> np.ndarray:
-        """Computes raw anomaly scores for each sample.
+        """Predicts anomaly labels (1 for normal inlier, -1 for anomalous outlier).
 
         Args:
             X (Union[pd.DataFrame, np.ndarray]): Input feature matrix.
 
         Returns:
-            np.ndarray: A 1D array of shape (n_samples,) representing anomaly scores.
-                Values range from [-1, 0]. The lower the score, the more anomalous the sample.
+            np.ndarray: 1D array of predicted class integers (1 or -1).
         """
-        return self.model.score_samples(X)
+        X_arr = X.values if isinstance(X, pd.DataFrame) else np.asarray(X)
+        return self.model.predict(X_arr)
+
+    def score(self, X: Union[pd.DataFrame, np.ndarray]) -> np.ndarray:
+        """Computes raw scikit-learn anomaly scores (higher is more normal).
+
+        Args:
+            X (Union[pd.DataFrame, np.ndarray]): Input feature matrix.
+
+        Returns:
+            np.ndarray: 1D array of float anomaly scores.
+        """
+        X_arr = X.values if isinstance(X, pd.DataFrame) else np.asarray(X)
+        return self.model.score_samples(X_arr)
+
+    def decision_function(self, X: Union[pd.DataFrame, np.ndarray]) -> np.ndarray:
+        """Computes decision function values. Negative values indicate anomalies.
+
+        Args:
+            X (Union[pd.DataFrame, np.ndarray]): Input feature matrix.
+
+        Returns:
+            np.ndarray: 1D array of decision values.
+        """
+        X_arr = X.values if isinstance(X, pd.DataFrame) else np.asarray(X)
+        return self.model.decision_function(X_arr)
+
+    def anomaly_score(self, X: Union[pd.DataFrame, np.ndarray]) -> np.ndarray:
+        """Computes anomaly score where higher values represent greater abnormality (-decision_function).
+
+        Args:
+            X (Union[pd.DataFrame, np.ndarray]): Input feature matrix.
+
+        Returns:
+            np.ndarray: 1D array of continuous anomaly scores.
+        """
+        return -self.decision_function(X)
 
     def save(self, filepath: str) -> None:
-        """Serializes and saves the scikit-learn model using joblib.
+        """Serializes and saves the model binary to disk.
 
         Args:
             filepath (str): Destination file path.
@@ -106,16 +128,18 @@ class IsolationForestModel(BaseModel):
         logger.info(f"Saved Isolation Forest model to {filepath}")
 
     def load(self, filepath: str) -> 'IsolationForestModel':
-        """Loads a serialized model state using joblib.
+        """Deserializes and restores model state from disk.
 
         Args:
             filepath (str): Source file path.
 
         Returns:
-            IsolationForestModel: The loaded model instance (self).
+            IsolationForestModel: Restored model instance (self).
         """
         self.model = joblib.load(filepath)
         logger.info(f"Loaded Isolation Forest model from {filepath}")
         return self
 
+
+# Canonical alias
 IForestModel = IsolationForestModel

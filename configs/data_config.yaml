@@ -4,28 +4,29 @@
 # ============================================================================
 
 data:
-  # 14 LSMP Feature columns used by the AI model
+  # 14 LSMP Feature columns used by the AI model (Auth & Nginx Core Schema)
   features:
-    - login_fail_count
-    - unique_failed_ip_count
-    - fail_success_ratio
-    - ip_entropy
-    - hour_of_day
-    - request_rate
-    - status_4xx_rate
-    - url_frequency
-    - user_agent_entropy
-    - method_distribution
-    - time_window_count
+    - auth_fail_count
+    - auth_success_count
+    - auth_fail_ratio
+    - distinct_username
+    - fail_interarrival_mean
+    - fail_interarrival_std
+    - http_req_rate
+    - http_4xx_ratio
+    - http_5xx_ratio
+    - http_post_ratio
+    - distinct_user_agent
+    - bytes_sent_mean
+    - global_active_ips
     - burst_rate
-    - sliding_window_count
-    - ip_switch_frequency
 
   # Time window for sliding-window feature aggregation (minutes)
   time_window_minutes: 1
 
-  # Train/test split ratio
-  train_test_split_ratio: 0.7
+  # Temporal split ratio matching SME-kit: Train (60%) / Validation (20%) / Test (20%)
+  split: [0.6, 0.2, 0.2]
+  train_test_split_ratio: 0.6
 
   # Database table name mappings (must match schema.sql)
   db_table_wazuh_alerts: "log_event"
@@ -37,7 +38,8 @@ data:
 raw_data_path: "data/raw"
 processed_data_path: "data/processed"
 external_data_path: "data/external"
-train_ratio: 0.7
-test_ratio: 0.3
+train_ratio: 0.6
+val_ratio: 0.2
+test_ratio: 0.2
 window_minutes: 60
 feature_version: "v1"

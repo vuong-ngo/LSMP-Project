@@ -25,9 +25,31 @@ from lsmp_ai.common.constants import FEATURE_COLUMNS
 
 # ===== Data Configuration Object =====
 class DataConfig:
-    def __init__(self, train_ratio: float = 0.7, test_ratio: float = 0.3, time_window_minutes: int = 1, features: Optional[List[str]] = None):
-        self.train_ratio = train_ratio
-        self.test_ratio = test_ratio
+    def __init__(
+        self,
+        train_ratio: float = 0.6,
+        test_ratio: float = 0.2,
+        val_ratio: Optional[float] = None,
+        split: Optional[List[float]] = None,
+        time_window_minutes: int = 1,
+        features: Optional[List[str]] = None,
+    ):
+        if split is not None and len(split) == 3:
+            self.train_ratio = float(split[0])
+            self.val_ratio = float(split[1])
+            self.test_ratio = float(split[2])
+            self.split = list(split)
+        else:
+            self.train_ratio = float(train_ratio)
+            self.test_ratio = float(test_ratio)
+            if val_ratio is not None:
+                self.val_ratio = float(val_ratio)
+            elif abs(self.train_ratio + self.test_ratio - 1.0) < 1e-5:
+                self.val_ratio = 0.0
+            else:
+                self.val_ratio = max(0.0, round(1.0 - self.train_ratio - self.test_ratio, 4))
+            self.split = [self.train_ratio, self.val_ratio, self.test_ratio]
+
         self.time_window_minutes = time_window_minutes
         self.features = features or list(FEATURE_COLUMNS)
 
@@ -129,9 +151,12 @@ class ConfigLoader:
     def data_config(self) -> DataConfig:
         data_section = self._raw_data_config.get("data", {})
         feats = data_section.get("features", list(FEATURE_COLUMNS))
+        split = data_section.get("split", [0.6, 0.2, 0.2])
         return DataConfig(
-            train_ratio=self._raw_data_config.get("train_ratio", 0.7),
-            test_ratio=self._raw_data_config.get("test_ratio", 0.3),
+            train_ratio=self._raw_data_config.get("train_ratio", 0.6),
+            test_ratio=self._raw_data_config.get("test_ratio", 0.2),
+            val_ratio=self._raw_data_config.get("val_ratio", 0.2),
+            split=split,
             time_window_minutes=data_section.get("time_window_minutes", 1),
             features=feats
         )
