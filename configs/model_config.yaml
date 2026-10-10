@@ -1,37 +1,47 @@
 # ============================================================================
 # file: model_config.yaml
 # Description: Configuration for Isolation Forest, OCSVM, and Cascade Model
+# Based on SME research experimental benchmarks.
 # ============================================================================
 
-# Default hyperparameters for Isolation Forest
+# Default hyperparameters for Isolation Forest (Liu et al., 2008)
 isolation_forest:
-  n_estimators: 100
-  max_samples: "auto"
+  n_estimators: 200
+  max_samples: 256
   contamination: 0.05
   random_state: 42
+  n_jobs: -1
 
-# Default hyperparameters for One-Class SVM
+# Default hyperparameters for One-Class SVM (Schölkopf et al.)
 one_class_svm:
   kernel: "rbf"
   nu: 0.05
   gamma: "scale"
 
-# Cascade Model configuration
+# Two-stage Cascade Model configuration
 cascade:
+  gate_rate: 0.20             # Top % most suspicious windows routed to Stage 2
+  w_stage1: 0.4               # Weight of Stage 1 in combined score fusion
+  threshold_percentile: 80    # Equivalent to 20% gate routing
   iforest_anomaly_threshold: -0.6
   iforest_normal_threshold: -0.45
-  threshold_percentile: 15
   model_version: "cascade-v1.0"
+
+# Operational threshold selection (validated on validation set)
+threshold:
+  criterion: "fpr_budget"     # f1 | f2 | fpr_budget
+  max_fpr: 0.02               # 2% false positive budget for SOC analyst workload
 
 # Hyperparameter search grids (used during grid search tuning)
 grid_search:
   iforest:
     n_estimators: [100, 200, 300]
-    max_samples: [0.5, 0.8, 1.0]
-    contamination: [0.05, 0.1, 0.15, 0.2]
+    max_samples: [128, 256, 512]
+    contamination: [0.01, 0.02, 0.05, 0.10, 0.20]
   ocsvm:
-    kernel: ["rbf", "poly", "sigmoid"]
-    nu: [0.05, 0.1, 0.2]
-    gamma: ["scale", "auto"]
+    kernel: ["rbf"]
+    nu: [0.01, 0.02, 0.05, 0.10, 0.20]
+    gamma: ["scale", "auto", 0.01, 0.1, 1.0]
+  gate_rate: [0.05, 0.10, 0.20, 0.30, 0.50, 1.00]
 
 model_store_path: "models_store"
