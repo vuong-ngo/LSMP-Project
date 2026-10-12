@@ -7,7 +7,7 @@ from __future__ import annotations
 from typing import Union, Optional, Dict, Any, List, Sequence
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import ParameterGrid
+from sklearn.model_selection import ParameterGrid, train_test_split
 
 from lsmp_ai.common.logger import setup_logger
 from lsmp_ai.models.isolation_forest_model import IForestModel
@@ -53,13 +53,17 @@ class HyperparameterSearch:
         X: Union[np.ndarray, pd.DataFrame],
         y: Optional[Union[np.ndarray, pd.Series]] = None,
         scoring: str = "f1_score",
+        X_val: Optional[Union[np.ndarray, pd.DataFrame]] = None,
+        y_val: Optional[Union[np.ndarray, pd.Series]] = None,
     ) -> Dict[str, Any]:
-        """Runs hyperparameter search across iForest, OCSVM, and gate rates.
+        """Runs hyperparameter search across iForest, OCSVM, and gate rates with validation support.
 
         Args:
             X (Union[np.ndarray, pd.DataFrame]): Input feature matrix.
             y (Optional[Union[np.ndarray, pd.Series]], optional): Target labels.
             scoring (str, optional): Target optimization metric. Defaults to "f1_score".
+            X_val (Optional[Union[np.ndarray, pd.DataFrame]], optional): Validation feature matrix.
+            y_val (Optional[Union[np.ndarray, pd.Series]], optional): Validation labels.
 
         Returns:
             Dict[str, Any]: Dictionary containing best params and tuning history.
@@ -67,16 +71,19 @@ class HyperparameterSearch:
         logger.info("Starting comprehensive HyperparameterSearch for CascadeModel...")
 
         # 1. Optimize Isolation Forest
-        best_if = grid_search_iforest(X, self.iforest_grid, y=y, scoring=scoring)
+        best_if = grid_search_iforest(X, self.iforest_grid, y=y, scoring=scoring, X_val=X_val, y_val=y_val)
         best_if_params = best_if["best_params"]
 
         # 2. Optimize One-Class SVM
-        best_oc = grid_search_ocsvm(X, self.ocsvm_grid, y=y, scoring=scoring)
+        best_oc = grid_search_ocsvm(X, self.ocsvm_grid, y=y, scoring=scoring, X_val=X_val, y_val=y_val)
         best_oc_params = best_oc["best_params"]
 
         # 3. Optimize Gate Rate
         best_gate_rate = 0.20
         best_cascade_score = -np.inf
+
+        X_eval = X_val if X_val is not None else X
+        y_eval = y_val if y_val is not None else y
 
         for gr in self.gate_rates:
             cascade = CascadeModel(
@@ -85,9 +92,9 @@ class HyperparameterSearch:
                 gate_rate=gr,
             )
             cascade.fit(X, y)
-            y_pred = cascade.predict(X)
-            y_score = cascade.score(X)
-            score_val = _evaluate_model_score(y, y_pred, y_score, scoring=scoring)
+            y_pred = cascade.predict(X_eval)
+            y_score = cascade.score(X_eval)
+            score_val = _evaluate_model_score(y_eval, y_pred, y_score, scoring=scoring)
 
             if score_val > best_cascade_score:
                 best_cascade_score = score_val
@@ -113,6 +120,8 @@ def grid_search_iforest(
     param_grid: Dict[str, List[Any]],
     y: Optional[Union[np.ndarray, pd.Series]] = None,
     scoring: str = "f1_score",
+    X_val: Optional[Union[np.ndarray, pd.DataFrame]] = None,
+    y_val: Optional[Union[np.ndarray, pd.Series]] = None,
 ) -> Dict[str, Any]:
     """Executes hyperparameter grid search for Isolation Forest."""
     best_score = -np.inf
@@ -120,12 +129,19 @@ def grid_search_iforest(
     results = []
     grid = list(ParameterGrid(param_grid))
 
+    if X_val is not None:
+        X_tr, X_ev, y_tr, y_ev = X, X_val, y, y_val
+    elif y is not None and len(X) >= 40:
+        X_tr, X_ev, y_tr, y_ev = train_test_split(X, y, test_size=0.25, random_state=42)
+    else:
+        X_tr, X_ev, y_tr, y_ev = X, X, y, y
+
     for params in grid:
         model = IForestModel(**params)
-        model.fit(X)
-        y_pred = model.predict(X)
-        y_score = model.score(X)
-        score_val = _evaluate_model_score(y, y_pred, y_score, scoring=scoring)
+        model.fit(X_tr)
+        y_pred = model.predict(X_ev)
+        y_score = model.score(X_ev)
+        score_val = _evaluate_model_score(y_ev, y_pred, y_score, scoring=scoring)
 
         results.append({**params, "score": score_val})
         if score_val > best_score or best_params is None:
@@ -140,6 +156,8 @@ def grid_search_ocsvm(
     param_grid: Dict[str, List[Any]],
     y: Optional[Union[np.ndarray, pd.Series]] = None,
     scoring: str = "f1_score",
+    X_val: Optional[Union[np.ndarray, pd.DataFrame]] = None,
+    y_val: Optional[Union[np.ndarray, pd.Series]] = None,
 ) -> Dict[str, Any]:
     """Executes hyperparameter grid search for One-Class SVM."""
     best_score = -np.inf
@@ -147,12 +165,19 @@ def grid_search_ocsvm(
     results = []
     grid = list(ParameterGrid(param_grid))
 
+    if X_val is not None:
+        X_tr, X_ev, y_tr, y_ev = X, X_val, y, y_val
+    elif y is not None and len(X) >= 40:
+        X_tr, X_ev, y_tr, y_ev = train_test_split(X, y, test_size=0.25, random_state=42)
+    else:
+        X_tr, X_ev, y_tr, y_ev = X, X, y, y
+
     for params in grid:
         model = OCSVMModel(**params)
-        model.fit(X, y)
-        y_pred = model.predict(X)
-        y_score = model.score(X)
-        score_val = _evaluate_model_score(y, y_pred, y_score, scoring=scoring)
+        model.fit(X_tr, y_tr)
+        y_pred = model.predict(X_ev)
+        y_score = model.score(X_ev)
+        score_val = _evaluate_model_score(y_ev, y_pred, y_score, scoring=scoring)
 
         results.append({**params, "score": score_val})
         if score_val > best_score or best_params is None:
