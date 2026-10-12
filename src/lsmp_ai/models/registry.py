@@ -137,9 +137,14 @@ class ModelRegistry:
                 subdirs.sort()
                 version = subdirs[-1]
 
-        model_dir = os.path.join(self.registry_dir, version)
-        if not os.path.exists(model_dir):
-            raise ModelNotFoundError(f"Model version directory not found: {model_dir}")
+        import re
+        if not re.match(r"^[a-zA-Z0-9_\-\.]+$", version):
+            raise ValueError(f"Invalid model version identifier format: {version}")
+
+        resolved_registry = os.path.realpath(self.registry_dir)
+        model_dir = os.path.realpath(os.path.join(self.registry_dir, version))
+        if not model_dir.startswith(resolved_registry) or not os.path.exists(model_dir):
+            raise ModelNotFoundError(f"Model version directory not found or unauthorized: {model_dir}")
 
         model = CascadeModel()
         model.load(model_dir)
