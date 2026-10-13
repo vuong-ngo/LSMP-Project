@@ -15,7 +15,10 @@ services:
   # ====== Loki Read Service (Query Engine) ======
   read:
     image: grafana/loki:${LOKI_VERSION:-latest}
-    command: "-config.file=/etc/loki/config.yaml -target=read"
+    command: "-config.file=/etc/loki/config.yaml -config.expand-env=true -target=read"
+    environment:
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:?S3_ACCESS_KEY is required}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:?S3_SECRET_KEY is required}
     restart: unless-stopped
     expose:
       - "3100"
@@ -39,7 +42,10 @@ services:
   # ====== Loki Write Service (Ingester & Distributor) ======
   write:
     image: grafana/loki:${LOKI_VERSION:-latest}
-    command: "-config.file=/etc/loki/config.yaml -target=write"
+    command: "-config.file=/etc/loki/config.yaml -config.expand-env=true -target=write"
+    environment:
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:?S3_ACCESS_KEY is required}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:?S3_SECRET_KEY is required}
     restart: unless-stopped
     expose:
       - "3100"
@@ -169,7 +175,10 @@ services:
     expose:
       - "3100"
       - "7946"
-    command: "-config.file=/etc/loki/config.yaml -target=backend -legacy-read-mode=false"
+    command: "-config.file=/etc/loki/config.yaml -config.expand-env=true -target=backend -legacy-read-mode=false"
+    environment:
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:?S3_ACCESS_KEY is required}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:?S3_SECRET_KEY is required}
     depends_on:
       - gateway
     healthcheck:
