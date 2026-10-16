@@ -1,6 +1,46 @@
-# LSMP Grafana & Loki Stack
+# LSMP Observability Stack (Grafana, Loki & SeaweedFS)
 
-This directory contains the Docker Compose configuration, Grafana dashboards, and Loki service configuration for the log storage and visualization layer of the LSMP project.
+This directory contains the Docker Compose deployment, service configurations, and operational runbook for the centralized observability and logging infrastructure of the **LSMP** (Log-based Security Monitoring Platform) project.
+
+---
+
+## 🏛 System Architecture
+
+The stack is designed with a distributed, microservices-oriented architecture to balance ingestion throughput, query efficiency, and storage economy:
+
+```text
+               +-------------------------------------------------------------+
+               |                       Client / Shippers                     |
+               +-------------------------------------------------------------+
+                                              |
+                                              | POST /loki/api/v1/push
+                                              v
++------------------------+        +------------------------------------------+
+|  Host & Container      |        |          gateway (Nginx:3100)            |
+|  Telemetry (Alloy,     |        +------------------------------------------+
+|  Node Exporter)        |               /                            \
++------------------------+              / (push)                       \ (query)
+            |                          v                                v
+            |                  +---------------+                +---------------+
+            v                  |  write (Loki) |                |  read (Loki)  |
+     +--------------+          +---------------+                +---------------+
+     |  Prometheus  |                  \                               /
+     +--------------+                   \                             /
+            |                            v                           v
+            |                      +---------------------------------------+
+            |                      |   seaweedfs (S3 Storage API :8333)    |
+            |                      +---------------------------------------+
+            |                                          ^
+            |                                          |
+            v                                  +---------------+
++------------------------+                     | backend (Loki)|
+|  grafana (Web UI:3000) |                     +---------------+
++------------------------+                       (Compactor)
+```
+
+* **Metrics Pipeline:** `node-exporter` (host system hardware) and `alloy` (container metrics) ➔ `prometheus` (time-series storage) ➔ `grafana` (visual dashboards).
+* **Logs Pipeline:** Applications & Shippers ➔ `gateway` (Nginx reverse proxy) ➔ routes ingest requests to `write` (TSDB indexing & chunk generation) ➔ flushes chunks to `seaweedfs` (S3 object storage) ➔ `read` queries chunks and serves results to `grafana`.
+* **Index & Compaction:** `backend` performs retention enforcement, table compaction, and deduplication directly against SeaweedFS.
 
 ---
 
@@ -8,251 +48,170 @@ This directory contains the Docker Compose configuration, Grafana dashboards, an
 
 ```text
 infrastructure/grafana_stack/
-├── docker-compose.yaml              # Docker Compose service definition
+├── docker-compose.yaml              # Multi-container orchestration definition
 ├── .env.example                     # Environment variables template
-├── README.md                        # This documentation file
+├── README.md                        # Documentation and operational runbook
 ├── config/
-│   ├── loki-config.yaml             # Grafana Loki distributed service configuration
-│   ├── prometheus.yml               # Prometheus scrape configuration
-│   ├── alloy-local-config.yaml      # Grafana Alloy telemetry config
-│   ├── grafana-datasources.yaml     # Grafana datasource provisioning (Loki + Prometheus)
-│   └── nginx.conf                   # Nginx reverse proxy gateway configuration
-└── dashboard/
-    ├── status_cpu_ram_container.json # Container resource monitoring dashboard
-    ├── auth_logs_dashboard.json      # Authentication logs dashboard
-    ├── lsmp_soc_overview.json        # SOC overview dashboard
-    └── lsmp_model_evaluation.json    # AI model evaluation dashboard
+│   ├── loki-config.yaml             # Distributed Loki cluster (Read/Write/Backend) & S3 storage configuration
+│   ├── prometheus.yml               # Prometheus scrape job definitions (Node Exporter, Alloy)
+│   ├── alloy-local-config.yaml      # Grafana Alloy container discovery via /var/run/docker.sock
+│   ├── grafana-datasources.yaml     # Declarative datasource provisioning for Loki and Prometheus
+│   └── nginx.conf                   # Nginx gateway reverse proxy and path-routing rules
+└── dashboard/                       # Pre-provisioned Grafana dashboard definitions (JSON format):
+    ├── status_cpu_ram_container.json # Container CPU, memory, and runtime resource utilization
+    ├── auth_logs_dashboard.json      # Security authentication events and login audit tracking
+    ├── lsmp_soc_overview.json        # High-level Security Operations Center (SOC) telemetry overview
+    └── lsmp_model_evaluation.json    # Machine learning model inference and evaluation metrics
 ```
 
 ---
 
-## 🏛 Distributed Log Architecture
+## 🌐 Services & Network Matrix
 
-The log ingestion and querying system is built on a distributed **Grafana Loki** setup behind an Nginx reverse proxy gateway, backed by **SeaweedFS** object storage.
+In accordance with the principle of least privilege, all internal cluster and storage communication is restricted to the internal Docker bridge network (`loki`). Only two services publish ports to the host machine:
 
-| Service | Role | Exposed Port |
-|---|---|---|
-| **gateway** (Nginx) | Reverse proxy entry point, routes push→write, query→read | `3100` (host) |
-| **write** | Ingests, indexes, and batches incoming log lines | Internal only |
-| **read** | Executes LogQL queries and aggregates results | Internal only |
-| **backend** | Manages compaction and index storage | Internal only |
-| **seaweedfs** | S3-compatible storage for log chunks | `8888` (Filer UI) |
-| **grafana** | Visualization dashboard with Loki + Prometheus datasources | `3000` (host) |
-| **prometheus** | Metrics scraping and storage | Internal only |
-| **node-exporter** | Host system metrics collector | Internal only |
-| **alloy** | Grafana telemetry agent | Internal only |
-| **flog** | Mock JSON log generator for testing | Internal only |
+| Service | Component Role | Host Port | Internal Port | Security & Access Policy |
+|---|---|---|---|---|
+| **gateway** | Nginx Reverse Proxy | `3100` | `3100` | **Public entry point** for shippers pushing logs via `/loki/api/v1/push` |
+| **grafana** | Visualization UI | `3000` | `3000` | Web UI; anonymous access is locked to the read-only `Viewer` role |
+| **read** | Query Frontend & Engine | *None* | `3100, 7946, 9095` | Internal only; handles LogQL queries dispatched by the gateway |
+| **write** | Ingester & Distributor | *None* | `3100, 7946, 9095` | Internal only; ingests, batches, and flushes log chunks to storage |
+| **backend** | Compactor & Index Gateway | *None* | `3100, 7946` | Internal only; handles TSDB compaction and retention lifecycle |
+| **seaweedfs** | S3-Compatible Object Store | *None* | `8333, 9333` | Internal only; S3 API endpoint for log chunk persistence |
+| **prometheus** | Time-Series Metrics DB | *None* | `9090` | Internal only; scraped targets and queried internally by Grafana |
+| **node-exporter** | Host Metrics Collector | *None* | `9100` | Internal only; mounts host `/proc` and `/sys` in read-only mode |
+| **alloy** | Telemetry Shipper | *None* | `12345` | Internal only; gathers logs directly from `/var/run/docker.sock` |
 
 ---
 
-## 🔧 What Was Changed in This Branch (`grafana_stack_fix`)
+## 🔐 Environment Variables Contract (`.env`)
 
-| Finding ID | File | Problem | Fix | Commit |
-|---|---|---|---|---|
-| GRAF-01 | `docker-compose.yaml` | Anonymous users get full Admin role | Changed to `Viewer` role | `fix(grafana_stack): downgrade anonymous access...` |
-| GRAF-02 | `docker-compose.yaml` | Internal service ports exposed to host | Replaced `ports` with `expose` for all internal services | `fix(grafana_stack): downgrade anonymous access...` |
-| GRAF-03 | `docker-compose.yaml`, `config/` | Grafana datasource + Nginx config inline in entrypoint | Extracted to `config/grafana-datasources.yaml` and `config/nginx.conf` | `refactor(grafana_stack): extract inline configs...` |
-| GRAF-04 | `docker-compose.yaml` | Inconsistent restart policies | Added `restart: unless-stopped` to all services | `fix(grafana_stack): downgrade anonymous access...` |
+Before launching the stack, create a local `.env` configuration file from [.env.example](file://./.env.example):
+
+| Variable | Description | Default / Example | Required? |
+|---|---|---|---|
+| `AWS_ACCESS_KEY_ID` | Access key for SeaweedFS S3 object storage authentication | `loki` | **Yes** |
+| `AWS_SECRET_ACCESS_KEY` | Secret key for SeaweedFS S3 object storage authentication | `supersecret` *(change in production)* | **Yes** |
+| `LOKI_VERSION` | Docker image tag for Grafana Loki | `3.0.0` | No |
+| `GRAFANA_VERSION` | Docker image tag for Grafana Dashboard | `11.1.0` | No |
+| `SEAWEEDFS_VERSION` | Docker image tag for SeaweedFS | `latest` | No |
+| `PROMETHEUS_VERSION` | Docker image tag for Prometheus | `v2.51.1` | No |
+| `NODE_EXPORTER_VERSION`| Docker image tag for Node Exporter | `v1.8.0` | No |
+| `ALLOY_VERSION` | Docker image tag for Grafana Alloy | `v1.2.1` | No |
+| `NGINX_VERSION` | Docker image tag for Nginx reverse proxy | `1.27.0-alpine` | No |
+
+> [!IMPORTANT]
+> The Loki services and SeaweedFS consume S3 credentials via a shared YAML anchor (`x-s3-env`) enforcing required interpolation: `${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID is required}`. If either credential variable is unset or empty, Docker Compose will immediately abort startup.
 
 ---
 
 ## 🚀 Step-by-Step Deployment Guide
 
 ### Prerequisites
+* **Docker Engine** version `24.0+`
+* **Docker Compose** V2 (`docker compose`, not legacy `docker-compose`)
+* Minimum available RAM: **2 GB**
 
-- Docker Engine 24+ and Docker Compose v2+
-- At least 2 GB RAM available
-
-### Step 1: Configure environment variables
-
+### Step 1: Initialize Environment File
 ```bash
 cd infrastructure/grafana_stack
 cp .env.example .env
 ```
-
-Edit `.env` and set custom MinIO credentials:
-```env
-MINIO_ROOT_USER=loki
-MINIO_ROOT_PASSWORD=<your-strong-password>
+Edit `.env` to define secure S3 credentials:
+```dotenv
+AWS_ACCESS_KEY_ID=loki
+AWS_SECRET_ACCESS_KEY=<your-secure-production-password>
 ```
 
-**Expected result:** `.env` file created with custom credentials.
-
----
-
-### Step 2: Start the stack
-
+### Step 2: Start the Stack
+Spin up all services in detached mode:
 ```bash
 docker compose up -d
 ```
 
-**Expected result:**
-```
-[+] Running 10/10
- ✔ Volume "grafana_stack_data_minio"  Created
- ✔ Container minio                    Started
- ✔ Container read                     Started
- ✔ Container write                    Started
- ✔ Container gateway                  Started
- ✔ Container backend                  Started
- ✔ Container grafana                  Started
- ✔ Container prometheus               Started
- ✔ Container node-exporter            Started
- ✔ Container alloy                    Started
-```
-
-MinIO starts first, then Loki read/write, then gateway, then Grafana.
-
----
-
-### Step 3: Verify all services are healthy
-
+### Step 3: Verify Container Health
+Verify that all services report an `Up` or `Up (healthy)` state:
 ```bash
 docker compose ps
 ```
 
-**Expected result:** All containers show `Up` or `Up (healthy)`. No containers in `Restarting` state.
-
-```
+*Expected output:*
+```text
 NAME            SERVICE        STATUS
-minio           minio          Up (healthy)
 read            read           Up (healthy)
 write           write          Up (healthy)
-gateway         gateway        Up (healthy)
-grafana         grafana        Up (healthy)
 backend         backend        Up (healthy)
+gateway         gateway        Up (healthy)
+seaweedfs       seaweedfs      Up (healthy)
+grafana         grafana        Up (healthy)
 prometheus      prometheus     Up
 node-exporter   node-exporter  Up
 alloy           alloy          Up
-flog            flog           Up
 ```
+
+### Step 4: Verify Endpoint Connectivity
+* **Grafana Web UI:** Open `http://localhost:3000` in a web browser. Datasources for Loki and Prometheus are automatically provisioned.
+* **Loki Gateway Health:**
+  ```bash
+  curl -s http://localhost:3100
+  ```
+  *Expected response:* `OK`
 
 ---
 
-### Step 4: Verify Grafana is accessible
+## 🧪 Verifying Log Ingestion (Testing Pipeline)
 
-```bash
-curl -s http://localhost:3000/api/health | python3 -m json.tool
-```
-
-**Expected result:**
-```json
-{
-    "commit": "...",
-    "database": "ok",
-    "version": "11.1.0"
-}
-```
-
----
-
-### Step 5: Verify anonymous access is Viewer-only
-
-Open `http://localhost:3000` in an **incognito browser window**.
-
-**Expected result:**
-- ✅ Dashboards load and are viewable
-- ✅ No admin gear icon in the sidebar
-- ❌ Cannot access Admin → Server Admin
-- ❌ Cannot create or modify datasources
-- ❌ Cannot create users or change org settings
-
----
-
-### Step 6: Verify Loki gateway is responding
-
-```bash
-curl -s http://localhost:3100
-```
-
-**Expected result:**
-```
-OK
-```
-
----
-
-### Step 7: Verify internal ports are NOT exposed to host
-
-```bash
-ss -tlnp | grep -E '9090|9100|9000|12345|3101|3102'
-```
-
-**Expected result:** **NO output** — none of these ports should be listening on the host. Only `3000` (Grafana) and `3100` (gateway) are exposed.
-
----
-
-### Step 8: Verify datasources are provisioned
-
-```bash
-curl -s http://localhost:3000/api/datasources | python3 -m json.tool
-```
-
-**Expected result:** Returns JSON array with `Loki` and `Prometheus` datasources:
-```json
-[
-    {
-        "name": "Loki",
-        "type": "loki",
-        "url": "http://gateway:3100",
-        ...
-    },
-    {
-        "name": "Prometheus",
-        "type": "prometheus",
-        "url": "http://prometheus:9090",
-        ...
-    }
-]
-```
-
----
-
-### Step 9: Test log ingestion (optional)
-
-Send a test log to Loki via the gateway:
+You can push a synthetic test log line directly through the gateway to verify the write-to-storage pipeline:
 
 ```bash
 curl -X POST http://localhost:3100/loki/api/v1/push \
   -H "Content-Type: application/json" \
   -H "X-Scope-OrgID: tenant1" \
-  -d '{"streams":[{"stream":{"job":"test"},"values":[["'$(date +%s)000000000'","hello from LSMP test"]]}]}'
+  -d "{\"streams\":[{\"stream\":{\"job\":\"lsmp-manual-test\",\"env\":\"production\"},\"values\":[[\"$(date +%s)000000000\",\"Hello from LSMP manual log pipeline test!\"]]}]}"
 ```
 
-**Expected result:** HTTP 204 (No Content) — the log was accepted.
-
-**Verify in Grafana:**
-1. Open `http://localhost:3000` → Explore → Select Loki datasource
-2. Query: `{job="test"}`
-3. **Expected:** Shows "hello from LSMP test" log entry.
+**Verification Steps:**
+1. The `curl` command should return HTTP `204 No Content` indicating successful ingestion.
+2. Navigate to `http://localhost:3000` ➔ **Explore** ➔ Select the **Loki** datasource.
+3. Execute the LogQL query:
+   ```logql
+   {job="lsmp-manual-test"}
+   ```
+4. The test log entry will be displayed in the query results panel.
 
 ---
 
-## 🛑 Teardown & Maintenance
+## 🛠️ Operational Runbook (Day-2 Operations)
 
-Stop and preserve data:
+### Viewing Service Logs
+```bash
+# Stream live logs for all running containers
+docker compose logs -f
+
+# Stream logs for a specific service
+docker compose logs -f gateway
+docker compose logs -f write
+docker compose logs -f seaweedfs
+```
+
+### Applying Configuration Updates
+When modifying files in `config/` (such as `nginx.conf` or `loki-config.yaml`), reload the affected containers:
+```bash
+docker compose restart gateway
+docker compose restart read write backend
+```
+
+### Safe Shutdown (Preserving Log Data)
+To halt all containers without deleting persistent storage:
 ```bash
 docker compose down
 ```
+> [!NOTE]
+> Persistent log chunks and index files are stored in the Docker volume `data_seaweedfs` and will remain intact across restarts.
 
-Stop and wipe all persistent storage:
+### Complete Teardown & Storage Purge (⚠️ Data Loss)
 ```bash
 docker compose down -v
 ```
-
----
-
-## ⚠️ Impact and Risks
-
-| Change | Impact | Risk |
-|---|---|---|
-| GRAF-01: Viewer role | Anonymous users can view dashboards but cannot modify anything | Users needing admin must log in with credentials |
-| GRAF-02: Internal ports hidden | Prometheus (9090), Node-Exporter (9100), MinIO (9000) no longer on host | External tools accessing these ports directly will break — use Grafana or Docker network instead |
-| GRAF-03: External config files | Config changes no longer require modifying docker-compose.yaml | None — improves maintainability |
-| GRAF-04: Restart policies | All services auto-restart after Docker daemon restart | None — best practice |
-
----
-
-## 📋 Known Issues / Not Fixed
-
-No findings were rejected. All 4 findings were implemented.
+> [!CAUTION]
+> The `-v` flag permanently removes the `data_seaweedfs` volume. All stored logs and compaction metadata will be permanently erased.
