@@ -211,14 +211,6 @@ services:
     networks:
       - loki
   
-  # ====== Flog (Synthetic Log Generator for Testing) ======
-  flog:
-    image: mingrammer/flog:${FLOG_VERSION:-latest}
-    restart: unless-stopped
-    command: -f json -d 200ms -l
-    networks:
-      - loki
-
 # ====== Persistent Storage Volumes ======
 volumes:
   data_seaweedfs:
