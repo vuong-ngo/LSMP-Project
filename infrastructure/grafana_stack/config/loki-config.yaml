@@ -42,8 +42,8 @@ common:
       endpoint: seaweedfs:8333
       insecure: true
       bucketnames: loki-data
-      access_key_id: ${S3_ACCESS_KEY:?S3_ACCESS_KEY is required}
-      secret_access_key: ${S3_SECRET_KEY:?S3_SECRET_KEY is required}
+      access_key_id: ${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID is required}
+      secret_access_key: ${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY is required}
       s3forcepathstyle: true
   ring:
     kvstore:
