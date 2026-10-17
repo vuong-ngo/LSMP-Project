@@ -51,6 +51,11 @@ infrastructure/grafana_stack/
 ├── docker-compose.yaml              # Multi-container orchestration definition
 ├── .env.example                     # Environment variables template
 ├── README.md                        # Documentation and operational runbook
+├── generate_certs.sh                # TLS certificate generator for Loki Gateway (Nginx :3100)
+├── certs/                           # TLS certificates & Root CA for Loki Gateway
+│   ├── ca.crt                       # Root CA certificate (distributed to clients)
+│   ├── loki_gateway.crt             # Signed TLS server certificate
+│   └── loki_gateway.key             # Private key for Nginx TLS termination
 ├── config/
 │   ├── loki-config.yaml             # Distributed Loki cluster (Read/Write/Backend) & S3 storage configuration
 │   ├── prometheus.yml               # Prometheus scrape job definitions (Node Exporter, Alloy)
@@ -123,13 +128,24 @@ AWS_ACCESS_KEY_ID=loki
 AWS_SECRET_ACCESS_KEY=<your-secure-production-password>
 ```
 
-### Step 2: Start the Stack
+### Step 2: Generate Loki Gateway TLS Certificates
+Run the automated certificate generator to create Root CA and signed TLS server certificates:
+```bash
+bash generate_certs.sh
+```
+*Optional SAN options for multi-host deployments:*
+```bash
+bash generate_certs.sh --domain loki.yourdomain.com --extra-ip <SERVER_B_IP>
+```
+*Expected output:* Generates `certs/ca.crt`, `certs/loki_gateway.crt`, and `certs/loki_gateway.key`. Verifies chain as `100% VALID`.
+
+### Step 3: Start the Stack
 Spin up all services in detached mode:
 ```bash
 docker compose up -d
 ```
 
-### Step 3: Verify Container Health
+### Step 4: Verify Container Health
 Verify that all services report an `Up` or `Up (healthy)` state:
 ```bash
 docker compose ps
@@ -149,22 +165,36 @@ node-exporter   node-exporter  Up
 alloy           alloy          Up
 ```
 
-### Step 4: Verify Endpoint Connectivity
+### Step 5: Verify Endpoint Connectivity
 * **Grafana Web UI:** Open `http://localhost:3000` in a web browser. Datasources for Loki and Prometheus are automatically provisioned.
-* **Loki Gateway Health:**
+* **Loki Gateway Health (HTTPS port 3100):**
   ```bash
-  curl -s http://localhost:3100
+  curl -k -s https://localhost:3100
+  # Or with Root CA verification:
+  curl --cacert certs/ca.crt -s https://localhost:3100
   ```
   *Expected response:* `OK`
+* **Internal Fallback (HTTP port 3101):**
+  ```bash
+  curl -s http://localhost:3101
+  ```
+  *Expected response:* `OK`
+
+### Step 6: Distribute Root CA to Clients
+Clients pushing logs to Loki (such as Fluent-Bit Client on monitored SME hosts) require `certs/ca.crt` to verify the TLS gateway:
+```bash
+# Example copying to a remote monitored host:
+scp certs/ca.crt user@<CLIENT_IP>:infrastructure/agent_stack/fluent-bit/client/certs/ca.crt
+```
 
 ---
 
 ## 🧪 Verifying Log Ingestion (Testing Pipeline)
 
-You can push a synthetic test log line directly through the gateway to verify the write-to-storage pipeline:
+You can push a synthetic test log line directly through the TLS gateway to verify the write-to-storage pipeline:
 
 ```bash
-curl -X POST http://localhost:3100/loki/api/v1/push \
+curl -k -X POST https://localhost:3100/loki/api/v1/push \
   -H "Content-Type: application/json" \
   -H "X-Scope-OrgID: tenant1" \
   -d "{\"streams\":[{\"stream\":{\"job\":\"lsmp-manual-test\",\"env\":\"production\"},\"values\":[[\"$(date +%s)000000000\",\"Hello from LSMP manual log pipeline test!\"]]}]}"
