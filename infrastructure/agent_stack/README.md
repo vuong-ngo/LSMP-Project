@@ -189,6 +189,7 @@ Deploy Loki Gateway (port `3100`) and SeaweedFS object storage to receive raw cl
 cd infrastructure/grafana_stack
 cp .env.example .env
 # Verify AWS_ACCESS_KEY_ID=loki and AWS_SECRET_ACCESS_KEY in .env
+bash generate_certs.sh
 docker compose up -d
 ```
 *Verification:*
@@ -329,7 +330,7 @@ sudo systemctl status wazuh-agent
 ```bash
 # On Monitored Host:
 mkdir -p infrastructure/agent_stack/fluent-bit/client/certs/
-scp user@<SERVER_B_IP>:infrastructure/agent_stack/fluent-bit/client/certs/ca.crt \
+scp user@<SERVER_B_IP>:infrastructure/grafana_stack/certs/ca.crt \
     infrastructure/agent_stack/fluent-bit/client/certs/ca.crt
 ```
 
@@ -356,7 +357,7 @@ If you are developing or testing **all components on a single machine / VM**, th
 # 1. Server B stacks
 docker network create lsmp_backend
 cd infrastructure/database_stack && docker compose up -d
-cd ../grafana_stack && docker compose up -d
+cd ../grafana_stack && bash generate_certs.sh && docker compose up -d
 
 # 2. Server A stack (Wazuh Manager)
 cd ../wazuh_stack

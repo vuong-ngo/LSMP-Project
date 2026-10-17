@@ -60,7 +60,7 @@ bash generate_keys.sh
 ```
 
 If the client machine is deployed independently on a separate remote network:
-1. Copy `ca.crt` generated from the Database Server into `./certs/ca.crt`.
+1. Copy `ca.crt` generated from Loki Gateway (Server B: `infrastructure/grafana_stack/certs/ca.crt`) into `./certs/ca.crt` (or pass via `--ca-cert`).
 2. Copy `.env.example` to `.env` and fill in your central server endpoints:
 
 ```env

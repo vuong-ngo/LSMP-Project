@@ -14,6 +14,8 @@ CERTS_DIR="${SCRIPT_DIR}/certs"
 ENV_FILE="${SCRIPT_DIR}/.env"
 ENV_EXAMPLE="${SCRIPT_DIR}/.env.example"
 DB_SERVER_CERTS="$(cd "${SCRIPT_DIR}/../server/database_server" 2>/dev/null && pwd)/certs"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../.." 2>/dev/null && pwd)"
+GRAFANA_STACK_CERTS="${PROJECT_ROOT}/grafana_stack/certs"
 
 # ====== Default CLI Parameters ======
 ARG_LOKI_HOST=""
@@ -61,19 +63,24 @@ mkdir -p "${CERTS_DIR}"
 if [ -n "${ARG_CA_CERT}" ] && [ -f "${ARG_CA_CERT}" ]; then
     echo "📋 Copying provided Root CA Certificate from ${ARG_CA_CERT}..."
     cp "${ARG_CA_CERT}" "${CERTS_DIR}/ca.crt"
+elif [ -f "${GRAFANA_STACK_CERTS}/ca.crt" ]; then
+    echo "📋 Auto-syncing Root CA Certificate from local grafana_stack (${GRAFANA_STACK_CERTS}/ca.crt)..."
+    cp "${GRAFANA_STACK_CERTS}/ca.crt" "${CERTS_DIR}/ca.crt"
 elif [ -f "${DB_SERVER_CERTS}/ca.crt" ]; then
     echo "📋 Auto-syncing Root CA Certificate from local database_server..."
     cp "${DB_SERVER_CERTS}/ca.crt" "${CERTS_DIR}/ca.crt"
 elif [ -f "${CERTS_DIR}/ca.crt" ]; then
     echo "✅ Existing Root CA certificate found at ${CERTS_DIR}/ca.crt"
 else
-    echo "🔑 Generating self-signed Root CA certificate fallback for TLS..."
+    echo "⚠️  Warning: No Root CA certificate found."
+    echo "   In production, copy ca.crt from Server B (grafana_stack/certs/ca.crt) to ${CERTS_DIR}/ca.crt"
+    echo "   Generating a self-signed fallback Root CA..."
     openssl req -x509 -newkey rsa:4096 -nodes \
         -keyout "${CERTS_DIR}/ca.key" \
         -out "${CERTS_DIR}/ca.crt" \
         -days 3650 \
         -subj "/C=VN/ST=Hanoi/L=Hanoi/O=LSMP Security/OU=Client/CN=LSMP-Root-CA" 2>/dev/null
-    echo "✅ Self-signed Root CA generated at ${CERTS_DIR}/ca.crt"
+    echo "✅ Self-signed fallback Root CA generated at ${CERTS_DIR}/ca.crt"
 fi
 
 # ====== Step 2: Configure Environment File (.env) ======
