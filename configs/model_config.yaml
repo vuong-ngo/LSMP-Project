@@ -8,14 +8,14 @@
 isolation_forest:
   n_estimators: 200
   max_samples: 256
-  contamination: 0.05
+  contamination: 0.02
   random_state: 42
   n_jobs: -1
 
 # Default hyperparameters for One-Class SVM (Schölkopf et al.)
 one_class_svm:
   kernel: "rbf"
-  nu: 0.05
+  nu: 0.02
   gamma: "scale"
 
 # Two-stage Cascade Model configuration
@@ -23,13 +23,15 @@ cascade:
   gate_rate: 0.20             # Top % most suspicious windows routed to Stage 2
   w_stage1: 0.4               # Weight of Stage 1 in combined score fusion
   threshold_percentile: 80    # Equivalent to 20% gate routing
+  threshold: 0.45             # Optimal decision boundary threshold for F1 >= 88%
+  uncertainty_margin: 0.06    # Dual-threshold uncertainty band [0.39, 0.51] for Three-Way Decision
   iforest_anomaly_threshold: -0.6
   iforest_normal_threshold: -0.45
   model_version: "cascade-v1.0"
 
 # Operational threshold selection (validated on validation set)
 threshold:
-  criterion: "fpr_budget"     # f1 | f2 | fpr_budget
+  criterion: "f1"             # f1 | f2 | fpr_budget
   max_fpr: 0.02               # 2% false positive budget for SOC analyst workload
 
 # Hyperparameter search grids (used during grid search tuning)
