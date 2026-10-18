@@ -11,9 +11,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 try:
     from dotenv import load_dotenv
-    _env_path = Path(__file__).resolve().parent.parent.parent.parent / ".env"
-    if _env_path.exists():
-        load_dotenv(dotenv_path=_env_path)
+    _src_env = Path(__file__).resolve().parent.parent / ".env"
+    _project_env = Path(__file__).resolve().parent.parent.parent.parent / ".env"
+    if _src_env.exists():
+        load_dotenv(dotenv_path=_src_env)
+    elif _project_env.exists():
+        load_dotenv(dotenv_path=_project_env)
     else:
         load_dotenv()
 except ImportError:
@@ -32,7 +35,9 @@ class DataConfig:
         val_ratio: Optional[float] = None,
         split: Optional[List[float]] = None,
         time_window_minutes: int = 1,
+        window_seconds: Optional[int] = None,
         features: Optional[List[str]] = None,
+        feature_version: str = "v2",
     ):
         if split is not None and len(split) == 3:
             self.train_ratio = float(split[0])
@@ -50,8 +55,12 @@ class DataConfig:
                 self.val_ratio = max(0.0, round(1.0 - self.train_ratio - self.test_ratio, 4))
             self.split = [self.train_ratio, self.val_ratio, self.test_ratio]
 
-        self.time_window_minutes = time_window_minutes
+        self.window_seconds = int(window_seconds if window_seconds is not None else (time_window_minutes * 60))
+        self.time_window_seconds = self.window_seconds
+        self.time_window_minutes = max(1, self.window_seconds // 60)
+        self.window_minutes = self.time_window_minutes
         self.features = features or list(FEATURE_COLUMNS)
+        self.feature_version = str(feature_version)
 
 
 # ===== Sub-Configuration =====
@@ -69,7 +78,7 @@ class ModelConfig:
         iforest_dict = {
             "n_estimators": [100],
             "max_samples": ["auto"],
-            "contamination": [0.05],
+            "contamination": [0.02],
             "random_state": [42]
         }
         if iforest_params:
@@ -77,7 +86,7 @@ class ModelConfig:
 
         ocsvm_dict = {
             "kernel": ["rbf"],
-            "nu": [0.05],
+            "nu": [0.02],
             "gamma": ["scale"]
         }
         if ocsvm_params:
@@ -87,10 +96,20 @@ class ModelConfig:
             "iforest_anomaly_threshold": -0.6,
             "iforest_normal_threshold": -0.45,
             "threshold_percentile": 80,
-            "model_version": "cascade-v2.0-clean"
+            "gate_rate": 0.20,
+            "w_stage1": 0.45,
+            "threshold": 0.45,
+            "uncertainty_margin": 0.06,
+            "model_version": "cascade-v1.0"
         }
         if cascade_params:
             cascade_dict.update(cascade_params)
+
+        # Build clean params dicts before list-wrapping for SubConfig compatibility
+        self.cascade_params = {
+            k: (v[0] if isinstance(v, list) and len(v) > 0 else v)
+            for k, v in cascade_dict.items()
+        }
 
         for d in [iforest_dict, ocsvm_dict, cascade_dict]:
             for k, v in d.items():
@@ -111,12 +130,6 @@ class ModelConfig:
             "kernel": self.ocsvm.kernel[0],
             "nu": self.ocsvm.nu[0],
             "gamma": self.ocsvm.gamma[0]
-        }
-        self.cascade_params = {
-            "iforest_anomaly_threshold": self.cascade.iforest_anomaly_threshold[0],
-            "iforest_normal_threshold": self.cascade.iforest_normal_threshold[0],
-            "threshold_percentile": self.cascade.threshold_percentile[0],
-            "model_version": self.cascade.model_version[0]
         }
 
 
@@ -152,13 +165,16 @@ class ConfigLoader:
         data_section = self._raw_data_config.get("data", {})
         feats = data_section.get("features", list(FEATURE_COLUMNS))
         split = data_section.get("split", [0.6, 0.2, 0.2])
+        feat_ver = str(self._raw_data_config.get("feature_version", data_section.get("feature_version", "v2")))
         return DataConfig(
             train_ratio=self._raw_data_config.get("train_ratio", 0.6),
             test_ratio=self._raw_data_config.get("test_ratio", 0.2),
             val_ratio=self._raw_data_config.get("val_ratio", 0.2),
             split=split,
             time_window_minutes=data_section.get("time_window_minutes", 1),
-            features=feats
+            window_seconds=data_section.get("window_seconds", data_section.get("time_window_seconds", 60)),
+            features=feats,
+            feature_version=feat_ver
         )
 
     @property
@@ -179,21 +195,49 @@ class ConfigLoader:
         return self.model_config
 
     @property
+    def feature_version(self) -> str:
+        data_section = self._raw_data_config.get("data", {})
+        return str(self._raw_data_config.get("feature_version", data_section.get("feature_version", "v2")))
+
+    @property
     def features(self) -> List[str]:
         data_section = self._raw_data_config.get("data", {})
         return data_section.get("features", list(FEATURE_COLUMNS))
 
     @property
+    def window_seconds(self) -> int:
+        data_section = self._raw_data_config.get("data", {})
+        if "window_seconds" in data_section:
+            return int(data_section["window_seconds"])
+        if "time_window_seconds" in data_section:
+            return int(data_section["time_window_seconds"])
+        if "window_seconds" in self._raw_data_config:
+            return int(self._raw_data_config["window_seconds"])
+        return int(self.time_window_minutes * 60)
+
+    @property
+    def time_window_seconds(self) -> int:
+        return self.window_seconds
+
+    @property
     def time_window_minutes(self) -> int:
-        return self._raw_data_config.get("data", {}).get("time_window_minutes", 1)
+        return max(1, self.window_seconds // 60)
+
+    @property
+    def window_minutes(self) -> int:
+        return self.time_window_minutes
 
     @property
     def train_ratio(self) -> float:
-        return self._raw_data_config.get("train_ratio", 0.7)
+        return self._raw_data_config.get("train_ratio", 0.6)
+
+    @property
+    def val_ratio(self) -> float:
+        return self._raw_data_config.get("val_ratio", 0.2)
 
     @property
     def test_ratio(self) -> float:
-        return self._raw_data_config.get("test_ratio", 0.3)
+        return self._raw_data_config.get("test_ratio", 0.2)
 
     @property
     def db_tables(self) -> Dict[str, str]:
@@ -223,15 +267,20 @@ class ConfigLoader:
     def cascade_params(self) -> Dict[str, Any]:
         params = self._raw_model_config.get("cascade", {})
         if not params or not isinstance(params, dict):
-            return {"iforest_anomaly_threshold": -0.6, "iforest_normal_threshold": -0.45, "threshold_percentile": 80, "model_version": "cascade-v2.0-clean"}
+            return {"iforest_anomaly_threshold": -0.6, "iforest_normal_threshold": -0.45, "threshold_percentile": 80, "model_version": "cascade-v1.0"}
         return params
 
     @property
     def risk_params(self) -> Dict[str, Any]:
         params = self._raw_risk_config.get("risk_scoring", {})
         if not params or not isinstance(params, dict):
-            return {"alpha": 0.6, "beta": 0.4, "max_wazuh_level": 15.0}
-        return params
+            params = {}
+        env_alpha = os.getenv("RISK_ALPHA")
+        env_beta = os.getenv("RISK_BETA")
+        alpha_val = float(env_alpha) if env_alpha else float(params.get("alpha", 0.6))
+        beta_val = float(env_beta) if env_beta else float(params.get("beta", 0.4))
+        max_lvl = float(params.get("max_wazuh_level", 15.0))
+        return {"alpha": alpha_val, "beta": beta_val, "max_wazuh_level": max_lvl}
 
     @property
     def risk_classification_params(self) -> Dict[str, Any]:
