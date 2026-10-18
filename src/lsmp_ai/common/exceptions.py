@@ -30,3 +30,10 @@ class ModelNotFoundError(LSMPError):
 class ModelTrainingError(LSMPError):
     """Raised when model training fails."""
     pass
+
+
+class SecurityError(LSMPError):
+    """Raised when an artifact integrity check, signature check, or security constraint fails."""
+    pass
+
+ModelIntegrityError = SecurityError
