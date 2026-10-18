@@ -41,11 +41,10 @@ Due to file size constraints (> 2.5 GB), raw benchmark datasets (`.csv` files) a
 data/
 ├── README.md                 <-- (Dataset Source & Link Documentation)
 ├── raw/                      <-- (Raw Dataset Directory)
-│   ├── *.log        		  <-- (Real-world OpenSSH syslog file)
-│   └── *.csv                 <-- (Extracted CICIDS2017 CSV files)
 ├── processed/                <-- (LSMP Feature-Engineered Dataset)
-│   └── dataset.csv           <-- (Processed 200,000 clean benchmark samples)
-└── interim/                  <-- (Offline Predictions Backup - predictions_fallback.csv)
+├── interim/                  <-- (Offline Predictions Backup - predictions_fallback.csv, serving_watermark.json)
+└── unlabeled/                <-- (Audited Unlabeled Data & Metadata Manifest for Active Learning)
+    └── README.md             <-- (Policy & documentation for unlabeled data handling)
 ```
 
 ---
@@ -53,7 +52,3 @@ data/
 ## ⚙️ 4. DATASET PREPROCESSING & FEATURE EXTRACTION
 
 After placing raw CSV files into `data/raw/`, run the preprocessing pipeline to map network flows to the 14 LSMP Feature Vectors:
-
-```bash
-python scripts/prepare_cicids2017.py
-```
