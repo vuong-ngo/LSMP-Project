@@ -10,7 +10,7 @@ services:
     container_name: lsmp-postgres
     restart: always
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
@@ -19,17 +19,18 @@ services:
     volumes:
       # Storage data
       - postgresql_data:/var/lib/postgresql/data
-      # Init database
-      - ./schema.sql:/docker-entrypoint-initdb.d/init.sql
+      # Init database (executed in alphabetical order on first run)
+      - ./schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+      - ./grant_least_privilege.sql:/docker-entrypoint-initdb.d/02_grant_least_privilege.sql
     networks:
       - lsmp_backend
     command: >
       postgres
       -c shared_buffers=512MB
-      -c work_mem=32MB
+      -c work_mem=16MB
       -c maintenance_work_mem=128MB
       -c effective_cache_size=1GB
-      -c max_connections=200
+      -c max_connections=100
       -c timescaledb.max_background_workers=4
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
@@ -39,7 +40,7 @@ services:
 
 networks:
   lsmp_backend:
-    external: true
+    name: lsmp_backend
 
 volumes:
   postgresql_data:
