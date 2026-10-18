@@ -11,7 +11,16 @@ import pandas as pd
 
 from lsmp_ai.common.logger import setup_logger
 from lsmp_ai.common.config_loader import config
+from lsmp_ai.common.constants import (
+    LABEL_NORMAL_ALIASES,
+    LABEL_ANOMALY_ALIASES,
+    LABEL_UNKNOWN_ALIASES,
+    LABEL_NORMAL,
+    LABEL_ANOMALY,
+    LABEL_UNCERTAIN,
+)
 from lsmp_ai.io.db_client import DatabaseClient
+from lsmp_ai.risk_scoring.risk_score import calibrate_wazuh_severity
 
 logger = setup_logger(__name__)
 
@@ -47,26 +56,30 @@ class ResultWriter:
             
             fv_id = row.get("feature_vector_id") or row.get("fv_id") or (row.get("id") if "feature_snapshot" not in row else None)
 
-            # Standardize predicted_label to 'Normal' or 'Anomaly'
-            raw_pred = str(row.get("predicted_label", "Normal")).strip()
-            if raw_pred in ["1", "1.0", "inlier", "Inlier", "Normal", "BENIGN", "benign"]:
-                pred_label = "Normal"
-            elif raw_pred in ["-1", "-1.0", "outlier", "Outlier", "Anomaly", "anomaly", "Attack", "attack"]:
-                pred_label = "Anomaly"
+            # Standardize predicted_label to 'Normal', 'Anomaly', or 'Uncertain'
+            raw_pred = str(row.get("predicted_label", LABEL_NORMAL)).strip().lower()
+            if raw_pred in LABEL_NORMAL_ALIASES:
+                pred_label = LABEL_NORMAL
+            elif raw_pred in LABEL_ANOMALY_ALIASES:
+                pred_label = LABEL_ANOMALY
+            elif raw_pred in LABEL_UNKNOWN_ALIASES or raw_pred in ["uncertain"]:
+                pred_label = LABEL_UNCERTAIN
             else:
-                pred_label = "Normal"
+                pred_label = LABEL_UNCERTAIN
 
             # Standardize ground_truth_label if present
             raw_gt = row.get("ground_truth_label") or row.get("label")
             if pd.isna(raw_gt) or raw_gt is None:
                 gt_label = None
             else:
-                gt_str = str(raw_gt).strip()
-                if gt_str in ["1", "1.0", "inlier", "Inlier", "Normal", "BENIGN", "benign"]:
-                    gt_label = "Normal"
-                elif gt_str in ["-1", "-1.0", "outlier", "Outlier", "Anomaly", "anomaly", "Attack", "attack"]:
-                    gt_label = "Anomaly"
+                gt_str = str(raw_gt).strip().lower()
+                if gt_str in LABEL_NORMAL_ALIASES:
+                    gt_label = LABEL_NORMAL
+                elif gt_str in LABEL_ANOMALY_ALIASES:
+                    gt_label = LABEL_ANOMALY
                 else:
+                    # Suspicious, Unknown, and other unresolved labels are not
+                    # promoted to confirmed Anomaly in the evaluation contract.
                     gt_label = None
 
             win_start = row.get("window_start")
@@ -80,13 +93,10 @@ class ResultWriter:
             anomaly_score_val = float(row.get("anomaly_score", 0.0))
             anomaly_score_val = min(max(anomaly_score_val, 0.0), 1.0)
 
-            severity_weight_val = float(row.get("severity_weight", 0.0))
-            risk_score_val = float(row.get("risk_score", 0.0))
-            risk_score_val = min(max(risk_score_val, 0.0), 100.0)
-
-            risk_class_val = str(row.get("risk_class", "Low")).strip().capitalize()
-            if risk_class_val not in ["Low", "Medium", "High", "Critical"]:
-                risk_class_val = "Low"
+            # Record review and uncertainty metadata into snapshot
+            if pred_label == "Uncertain" or row.get("review_required"):
+                feature_dict["_review_required"] = True
+                feature_dict["_uncertainty_reason"] = str(row.get("uncertainty_reason", "Score in uncertainty band"))
 
             anomaly_rows.append({
                 "id": anomaly_id,
@@ -101,24 +111,38 @@ class ResultWriter:
                 "ground_truth_label": gt_label,
                 "label_source": row.get("label_source")
             })
-            
-            alpha = 0.6
-            beta = 0.4
-            if config and hasattr(config, "risk_params") and config.risk_params:
-                alpha = float(config.risk_params.get("alpha", alpha))
-                beta = float(config.risk_params.get("beta", beta))
 
-            risk_rows.append({
-                "id": risk_id,
-                "src_ip": src_ip,
-                "asset_id": row.get("agent_id") or row.get("asset_id"),
-                "anomaly_result_id": anomaly_id,
-                "ai_component": alpha * anomaly_score_val,
-                "rule_component": beta * (min(max(severity_weight_val, 0.0), 15.0) / 15.0),
-                "score": risk_score_val,
-                "risk_class": risk_class_val,
-                "timestamp": row.get("timestamp") or win_start
-            })
+            # Gate Risk Scoring: Uncertain predictions skip risk_score table generation (User Decision A1)
+            if pred_label != "Uncertain" and not pd.isna(row.get("risk_score")):
+                severity_weight_val = float(row.get("severity_weight", 0.0))
+                risk_score_val = float(row.get("risk_score", 0.0))
+                risk_score_val = min(max(risk_score_val, 0.0), 100.0)
+
+                risk_class_val = str(row.get("risk_class", "Low")).strip().capitalize()
+                if risk_class_val not in ["Low", "Medium", "High", "Critical"]:
+                    risk_class_val = "Low"
+
+                alpha = 0.6
+                beta = 0.4
+                if config and hasattr(config, "risk_params") and config.risk_params:
+                    alpha = float(config.risk_params.get("alpha", alpha))
+                    beta = float(config.risk_params.get("beta", beta))
+                total_weight = alpha + beta
+                if total_weight > 0:
+                    alpha = alpha / total_weight
+                    beta = beta / total_weight
+
+                risk_rows.append({
+                    "id": risk_id,
+                    "src_ip": src_ip,
+                    "asset_id": row.get("agent_id") or row.get("asset_id"),
+                    "anomaly_result_id": anomaly_id,
+                    "ai_component": alpha * anomaly_score_val,
+                    "rule_component": beta * float(calibrate_wazuh_severity(severity_weight_val)),
+                    "score": risk_score_val,
+                    "risk_class": risk_class_val,
+                    "timestamp": row.get("timestamp") or win_start
+                })
             
         df_anomaly = pd.DataFrame(anomaly_rows)
         df_risk = pd.DataFrame(risk_rows)
