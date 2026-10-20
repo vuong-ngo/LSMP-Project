@@ -58,16 +58,40 @@ class ModelRegistry:
             logger.info(f"Version {version} already exists. Backing up existing directory to {backup_dir}")
             shutil.move(model_dir, backup_dir)
 
+            # Retention policy: keep only the 2 most recent backups to prevent disk buildup
+            try:
+                old_backups = sorted([
+                    os.path.join(self.registry_dir, d) for d in os.listdir(self.registry_dir)
+                    if d.startswith(f"{version}_backup_") and os.path.isdir(os.path.join(self.registry_dir, d))
+                ])
+                while len(old_backups) > 2:
+                    to_remove = old_backups.pop(0)
+                    shutil.rmtree(to_remove, ignore_errors=True)
+                    logger.info(f"Pruned old model backup: {to_remove}")
+            except Exception as prune_err:
+                logger.warning(f"Could not prune old model backups: {prune_err}")
+
         os.makedirs(model_dir, exist_ok=True)
 
         # 1. Save model binaries
         model.save(model_dir)
 
-        # 2. Build metadata manifest
+        # 2. Build metadata manifest with cryptographic SHA-256 artifact hashes (S2 defense)
+        from lsmp_ai.common.security import compute_file_sha256, secure_file_permissions, secure_directory_permissions
+        secure_directory_permissions(model_dir, 0o750)
+
+        artifact_hashes = {}
+        for fname in ["iforest.joblib", "ocsvm.joblib", "feature_pipeline.joblib"]:
+            fpath = os.path.join(model_dir, fname)
+            if os.path.exists(fpath):
+                secure_file_permissions(fpath, 0o640)
+                artifact_hashes[fname] = compute_file_sha256(fpath)
+
         manifest = {
             "version": version,
             "registered_at": datetime.now().isoformat(),
             "metrics": metrics or {},
+            "artifact_hashes": artifact_hashes,
             "hyperparameters": {
                 "gate_rate": getattr(model, "gate_rate", 0.20),
                 "gate_threshold": getattr(model, "gate_threshold", 0.0),
@@ -83,6 +107,7 @@ class ModelRegistry:
         manifest_path = os.path.join(model_dir, "manifest.json")
         with open(manifest_path, "w") as f:
             json.dump(manifest, f, indent=4)
+        secure_file_permissions(manifest_path, 0o640)
 
         # 3. Update global catalog index
         catalog_path = os.path.join(self.registry_dir, "catalog.json")
@@ -99,12 +124,14 @@ class ModelRegistry:
 
         with open(catalog_path, "w") as f:
             json.dump(catalog, f, indent=4)
+        secure_file_permissions(catalog_path, 0o640)
 
         logger.info(f"Successfully registered model version '{version}' to registry.")
         return version
 
     def load_model(self, version: Optional[str] = None) -> CascadeModel:
         """Loads and deserializes a CascadeModel instance by version (or latest).
+        Verifies SHA-256 artifact integrity before deserialization.
 
         Args:
             version (Optional[str], optional): Specific version identifier.
@@ -115,6 +142,7 @@ class ModelRegistry:
 
         Raises:
             ModelNotFoundError: If requested model directory does not exist.
+            SecurityError: If an artifact has been tampered with or corrupted.
         """
         catalog_path = os.path.join(self.registry_dir, "catalog.json")
 
@@ -130,21 +158,77 @@ class ModelRegistry:
             if not version:
                 subdirs = [
                     d for d in os.listdir(self.registry_dir)
-                    if os.path.isdir(os.path.join(self.registry_dir, d)) and not d.endswith("_backup")
+                    if os.path.isdir(os.path.join(self.registry_dir, d))
+                    and "_backup" not in d
+                    and not d.startswith(".")
                 ]
                 if not subdirs:
                     raise ModelNotFoundError("No registered models found in registry.")
                 subdirs.sort()
                 version = subdirs[-1]
 
-        model_dir = os.path.join(self.registry_dir, version)
-        if not os.path.exists(model_dir):
-            raise ModelNotFoundError(f"Model version directory not found: {model_dir}")
+        import re
+        if not re.match(r"^[a-zA-Z0-9_\-\.]+$", version):
+            raise ValueError(f"Invalid model version identifier format: {version}")
+
+        resolved_registry = os.path.realpath(self.registry_dir)
+        model_dir = os.path.realpath(os.path.join(self.registry_dir, version))
+        if not model_dir.startswith(resolved_registry) or not os.path.exists(model_dir):
+            raise ModelNotFoundError(f"Model version directory not found or unauthorized: {model_dir}")
+
+        manifest_path = os.path.join(model_dir, "manifest.json")
+        if os.path.exists(manifest_path):
+            try:
+                with open(manifest_path, "r") as f:
+                    manifest_data = json.load(f)
+                art_hashes = manifest_data.get("artifact_hashes")
+                if art_hashes:
+                    from lsmp_ai.common.security import verify_artifacts_in_dir
+                    verify_artifacts_in_dir(model_dir, art_hashes)
+            except Exception as e:
+                from lsmp_ai.common.exceptions import SecurityError
+                if isinstance(e, SecurityError):
+                    raise
+                logger.warning(f"Manifest verification warning for {version}: {e}")
 
         model = CascadeModel()
         model.load(model_dir)
         logger.info(f"Loaded CascadeModel version '{version}' from registry.")
         return model
+
+    def refresh_artifact_manifest(self, version: str) -> Dict[str, Any]:
+        """Refresh hashes after auxiliary artifacts are added to a model version."""
+        model_dir = os.path.realpath(os.path.join(self.registry_dir, version))
+        registry_root = os.path.realpath(self.registry_dir)
+        if not model_dir.startswith(registry_root) or not os.path.isdir(model_dir):
+            raise ModelNotFoundError(f"Model version directory not found: {model_dir}")
+
+        from lsmp_ai.common.security import compute_file_sha256
+
+        manifest_path = os.path.join(model_dir, "manifest.json")
+        if not os.path.exists(manifest_path):
+            raise ModelNotFoundError(f"Model manifest not found: {manifest_path}")
+        with open(manifest_path, "r") as stream:
+            manifest = json.load(stream)
+
+        artifact_hashes = dict(manifest.get("artifact_hashes") or {})
+        for fname in ("iforest.joblib", "ocsvm.joblib", "feature_pipeline.joblib"):
+            path = os.path.join(model_dir, fname)
+            if os.path.exists(path):
+                artifact_hashes[fname] = compute_file_sha256(path)
+        manifest["artifact_hashes"] = artifact_hashes
+
+        with open(manifest_path, "w") as stream:
+            json.dump(manifest, stream, indent=4)
+
+        catalog_path = os.path.join(self.registry_dir, "catalog.json")
+        if os.path.exists(catalog_path):
+            with open(catalog_path, "r") as stream:
+                catalog = json.load(stream)
+            catalog[version] = manifest
+            with open(catalog_path, "w") as stream:
+                json.dump(catalog, stream, indent=4)
+        return manifest
 
     def list_versions(self) -> List[str]:
         """Lists all registered model versions from the catalog.
