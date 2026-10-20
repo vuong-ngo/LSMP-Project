@@ -44,7 +44,7 @@ class OCSVMModel(BaseModel):
             else:
                 all_params = {
                     "kernel": "rbf",
-                    "nu": 0.05,
+                    "nu": 0.02,
                     "gamma": "scale",
                 }
         self.params = all_params
@@ -127,17 +127,28 @@ class OCSVMModel(BaseModel):
             filepath (str): Destination file path.
         """
         joblib.dump(self.model, filepath)
+        from lsmp_ai.common.security import secure_file_permissions
+        secure_file_permissions(filepath, 0o640)
         logger.info(f"Saved One-Class SVM model to {filepath}")
 
-    def load(self, filepath: str) -> 'OCSVMModel':
-        """Deserializes and restores model state from disk.
+    def load(self, filepath: str, expected_hash: Optional[str] = None) -> 'OCSVMModel':
+        """Deserializes and restores model state from disk after verifying integrity.
 
         Args:
             filepath (str): Source file path.
+            expected_hash (Optional[str]): Optional expected SHA-256 digest.
 
         Returns:
             OCSVMModel: Restored model instance (self).
         """
+        if expected_hash:
+            from lsmp_ai.common.security import verify_file_integrity
+            from lsmp_ai.common.exceptions import SecurityError
+            if not verify_file_integrity(filepath, expected_hash):
+                raise SecurityError(
+                    f"Security integrity check FAILED for '{filepath}'! "
+                    "Deserialization aborted to prevent arbitrary code execution (RCE)."
+                )
         self.model = joblib.load(filepath)
         logger.info(f"Loaded One-Class SVM model from {filepath}")
         return self
