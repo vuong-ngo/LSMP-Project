@@ -20,30 +20,27 @@ one_class_svm:
 
 # Two-stage Cascade Model configuration
 cascade:
-  gate_rate: 0.20             # Top % most suspicious windows routed to Stage 2
+  gate_rate: 0.20             # Default % most suspicious windows routed to Stage 2 (tuned on validation)
   w_stage1: 0.4               # Weight of Stage 1 in combined score fusion
-  threshold_percentile: 80    # Equivalent to 20% gate routing
-  threshold: 0.45             # Optimal decision boundary threshold for F1 >= 88%
-  uncertainty_margin: 0.06    # Dual-threshold uncertainty band [0.39, 0.51] for Three-Way Decision
-  iforest_anomaly_threshold: -0.6
-  iforest_normal_threshold: -0.45
+  uncertainty_margin: 0.0     # Uncertainty band width for Three-Way Decision (0.0 to disable arbitrary abstention)
   model_version: "cascade-v1.0"
 
-# Operational threshold selection (validated on validation set)
+# Operational threshold selection (calibrated on validation set)
 threshold:
-  criterion: "f1"             # f1 | f2 | fpr_budget
-  max_fpr: 0.02               # 2% false positive budget for SOC analyst workload
+  criterion: "fpr_budget"     # f1 | f2 | fpr_budget
+  max_fpr: 0.02               # False positive budget aligned with SME SOC daily alert capacity
 
 # Hyperparameter search grids (used during grid search tuning)
 grid_search:
   iforest:
-    n_estimators: [100, 200, 300]
-    max_samples: [128, 256, 512]
-    contamination: [0.01, 0.02, 0.05, 0.10, 0.20]
+    n_estimators: [100, 200]
+    max_samples: [256, 512]
   ocsvm:
     kernel: ["rbf"]
-    nu: [0.01, 0.02, 0.05, 0.10, 0.20]
-    gamma: ["scale", "auto", 0.01, 0.1, 1.0]
-  gate_rate: [0.05, 0.10, 0.20, 0.30, 0.50, 1.00]
+    nu: [0.01, 0.02, 0.05]
+    gamma: ["scale", 0.01, 0.1]
+  cascade:
+    gate_rate: [0.20, 0.30, 0.50, 1.00]
+    w_stage1: [0.2, 0.4, 0.6]
 
 model_store_path: "models_store"
