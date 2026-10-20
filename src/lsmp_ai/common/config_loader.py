@@ -93,13 +93,10 @@ class ModelConfig:
             ocsvm_dict.update(ocsvm_params)
 
         cascade_dict = {
-            "iforest_anomaly_threshold": -0.6,
-            "iforest_normal_threshold": -0.45,
-            "threshold_percentile": 80,
             "gate_rate": 0.20,
-            "w_stage1": 0.45,
-            "threshold": 0.45,
-            "uncertainty_margin": 0.06,
+            "w_stage1": 0.40,
+            "threshold_percentile": 80,
+            "uncertainty_margin": 0.0,
             "model_version": "cascade-v1.0"
         }
         if cascade_params:
@@ -267,7 +264,21 @@ class ConfigLoader:
     def cascade_params(self) -> Dict[str, Any]:
         params = self._raw_model_config.get("cascade", {})
         if not params or not isinstance(params, dict):
-            return {"iforest_anomaly_threshold": -0.6, "iforest_normal_threshold": -0.45, "threshold_percentile": 80, "model_version": "cascade-v1.0"}
+            return {"gate_rate": 0.20, "w_stage1": 0.40, "uncertainty_margin": 0.0, "model_version": "cascade-v1.0"}
+        return params
+
+    @property
+    def threshold_params(self) -> Dict[str, Any]:
+        params = self._raw_model_config.get("threshold", {})
+        if not params or not isinstance(params, dict):
+            return {"criterion": "fpr_budget", "max_fpr": 0.02}
+        return params
+
+    @property
+    def grid_search_params(self) -> Dict[str, Any]:
+        params = self._raw_model_config.get("grid_search", {})
+        if not params or not isinstance(params, dict):
+            return {}
         return params
 
     @property

@@ -6,6 +6,7 @@
 # Labels
 LABEL_NORMAL = "Normal"
 LABEL_ANOMALY = "Anomaly"
+LABEL_SUSPICIOUS = "Suspicious"
 LABEL_UNCERTAIN = "Uncertain"
 LABEL_UNKNOWN = "Unknown"
 
@@ -16,7 +17,8 @@ STATUS_ABSTAINED = "ABSTAINED"
 
 # Standard raw-to-canonical label mapping
 LABEL_NORMAL_ALIASES = {"benign", "normal", "clean", "0", "0.0", "inlier"}
-LABEL_ANOMALY_ALIASES = {"attack", "suspicious", "anomaly", "1", "1.0", "-1", "-1.0", "outlier"}
+LABEL_ANOMALY_ALIASES = {"attack", "anomaly", "1", "1.0", "-1", "-1.0", "outlier"}
+LABEL_SUSPICIOUS_ALIASES = {"suspicious"}
 LABEL_UNKNOWN_ALIASES = {"unknown", "uncertain", "none", "nan", "null", "undefined", ""}
 
 # Label sources
@@ -60,4 +62,3 @@ FEATURE_COLUMNS = [
     "global_active_ips",
     "burst_rate"
 ]
-
