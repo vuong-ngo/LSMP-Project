@@ -22,7 +22,13 @@ from lsmp_ai.models.isolation_forest_model import IsolationForestModel
 from lsmp_ai.models.ocsvm_model import OCSVMModel
 from lsmp_ai.common.logger import logger
 from lsmp_ai.common.config_loader import config
-from lsmp_ai.common.constants import LABEL_NORMAL, LABEL_ANOMALY
+from lsmp_ai.common.constants import (
+    LABEL_NORMAL,
+    LABEL_ANOMALY,
+    LABEL_UNCERTAIN,
+    STATUS_CONFIDENT,
+    STATUS_UNCERTAIN,
+)
 from lsmp_ai.risk_scoring.risk_score import calculate_risk_score
 
 EPS = 1e-12
@@ -54,6 +60,7 @@ class CascadeModel(BaseModel):
         iforest_params: Optional[Dict[str, Any]] = None,
         ocsvm_params: Optional[Dict[str, Any]] = None,
         cascade_params: Optional[Dict[str, Any]] = None,
+        uncertainty_margin: Optional[float] = None,
     ):
         """Initializes the CascadeModel.
 
@@ -103,19 +110,24 @@ class CascadeModel(BaseModel):
         else:
             self.gate_rate = 0.20
 
-        self.w_stage1 = float(w_stage1 if w_stage1 is not None else c_params.get("w_stage1", 0.4))
+        self.w_stage1 = float(w_stage1 if w_stage1 is not None else c_params.get("w_stage1", 0.45))
         self.model_version = str(c_params.get("model_version", "cascade-v1.0"))
 
         # 4. Routing and decision thresholds
         self.gate_threshold: float = 0.0
-        self.threshold: float = 0.5
+        self.threshold: float = float(c_params.get("threshold", 0.45))
+        self.uncertainty_margin: float = float(uncertainty_margin if uncertainty_margin is not None else c_params.get("uncertainty_margin", 0.06))
+        self.tau_low: float = max(0.0, self.threshold - self.uncertainty_margin)
+        self.tau_high: float = self.threshold
         self.is_fitted: bool = False
 
-        # Min-max normalization anchors
+        # Min-max and ECDF quantile normalization anchors
         self.if_min: float = 0.0
         self.if_max: float = 1.0
         self.oc_min: float = 0.0
         self.oc_max: float = 1.0
+        self.if_quantiles: Optional[np.ndarray] = None
+        self.oc_quantiles: Optional[np.ndarray] = None
 
         # Legacy backward-compatibility attributes
         self.anomaly_threshold: float = float(c_params.get("iforest_anomaly_threshold", -0.6))
@@ -139,7 +151,7 @@ class CascadeModel(BaseModel):
         y: Any = None,
         X_val: Optional[Union[pd.DataFrame, np.ndarray]] = None,
         y_val: Any = None,
-        criterion: str = "f2",
+        criterion: str = "fpr_budget",
         max_fpr: float = 0.02,
     ) -> 'CascadeModel':
         """Fits both Stage 1 and Stage 2 models using novelty detection principles.
@@ -168,13 +180,19 @@ class CascadeModel(BaseModel):
                 X_train_clean = X_arr[normal_mask]
                 logger.info(f"Training on {len(X_train_clean)} benign samples (out of {len(X_arr)} total).")
             else:
-                logger.warning("No benign samples identified; fitting on all available samples.")
+                raise ValueError(
+                    "No benign samples identified; refusing to fit novelty detector "
+                    "on an unverified training partition."
+                )
+        if len(X_train_clean) == 0:
+            raise ValueError("Cannot fit CascadeModel with an empty benign training partition.")
 
         # 1. Fit Stage 1: Isolation Forest
         self.iforest_model.fit(X_train_clean)
         s_if_tr = self._if_score(X_train_clean)
         self.if_min = float(np.min(s_if_tr))
         self.if_max = float(np.max(s_if_tr))
+        self.if_quantiles = np.quantile(s_if_tr, np.linspace(0.0, 1.0, 501))
 
         # 2. Compute Gating Threshold
         q_level = max(0.01, min(0.9999, 1.0 - self.gate_rate))
@@ -188,27 +206,55 @@ class CascadeModel(BaseModel):
         s_oc_tr = self._oc_score(X_train_clean)
         self.oc_min = float(np.min(s_oc_tr))
         self.oc_max = float(np.max(s_oc_tr))
+        self.oc_quantiles = np.quantile(s_oc_tr, np.linspace(0.0, 1.0, 501))
 
         # 4. Calibrate Final Threshold
         if X_val is not None and y_val is not None:
             X_v = X_val.values if isinstance(X_val, pd.DataFrame) else np.asarray(X_val)
             s_val = self.score(X_v)
-            self.threshold = pick_threshold(y_val, s_val, criterion=criterion, max_fpr=max_fpr)
-            logger.info(f"Optimal threshold chosen on validation ({criterion}): {self.threshold:.4f}")
+            yt_v = to_binary_labels(y_val)
+            if np.any(yt_v == 1) and np.any(yt_v == 0):
+                self.threshold = pick_threshold(y_val, s_val, criterion=criterion, max_fpr=max_fpr)
+                logger.info(f"Optimal threshold chosen on validation ({criterion}): {self.threshold:.4f}")
+            else:
+                logger.warning("Validation set has only 1 class. Using robust score quantile threshold.")
+                self.threshold = float(np.quantile(s_val, max(0.5, 1.0 - self.gate_rate)))
         else:
-            s_train = self.score(X_arr)
+            s_train = self.score(X_train_clean)
             self.threshold = float(np.quantile(s_train, max(0.5, 1.0 - self.gate_rate)))
 
+        self.tau_low = max(0.0, float(self.threshold - self.uncertainty_margin))
+        self.tau_high = float(self.threshold)
         self.is_fitted = True
-        logger.info(f"CascadeModel training completed. Decision threshold: {self.threshold:.4f}")
+        logger.info(
+            f"CascadeModel training completed. Decision threshold: {self.threshold:.4f} "
+            f"(Uncertainty Band: [{self.tau_low:.4f}, {self.tau_high:.4f}])"
+        )
         return self
 
-    def _normalize_score(self, s: np.ndarray, lo: float, hi: float) -> np.ndarray:
-        """Min-max normalizes scores into [0, 1] without overflow or NaNs."""
+    def _normalize_score(
+        self,
+        s: np.ndarray,
+        lo: float,
+        hi: float,
+        quantiles: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
+        """Normalizes anomaly scores into [0, 1] using empirical CDF percentiles,
+        providing resilience against extreme benign training outliers,
+        with robust min-max fallback."""
+        finite_s = np.where(np.isfinite(s), s, lo)
+        if quantiles is not None and len(quantiles) > 1:
+            norm_s = np.interp(
+                finite_s,
+                quantiles,
+                np.linspace(0.0, 1.0, len(quantiles)),
+                left=0.0,
+                right=1.0,
+            )
+            return np.clip(norm_s, 0.0, 1.0)
         diff = hi - lo
         if abs(diff) < EPS:
             diff = 1.0
-        finite_s = np.where(np.isfinite(s), s, lo)
         norm_s = (finite_s - lo) / (diff + EPS)
         return np.clip(norm_s, 0.0, 1.0)
 
@@ -234,6 +280,8 @@ class CascadeModel(BaseModel):
                 "stage1_score": np.array([], dtype=float),
                 "stage2_score": np.array([], dtype=float),
                 "anomaly_score": np.array([], dtype=float),
+                "confidence_margin": np.array([], dtype=float),
+                "prediction_status": np.array([], dtype=object),
                 "predicted_label": np.array([], dtype=object),
             })
 
@@ -253,22 +301,41 @@ class CascadeModel(BaseModel):
             stage2_scores[gated_mask] = s_oc
             s_oc_gated[gated_mask] = s_oc
 
-        # Normalized Fusion
-        norm_if = self._normalize_score(s_if, self.if_min, self.if_max)
-        norm_oc = self._normalize_score(s_oc_gated, self.oc_min, self.oc_max)
-        norm_oc[~gated_mask] = 0.0
+        # Normalized Fusion using ECDF percentiles
+        norm_if = self._normalize_score(s_if, self.if_min, self.if_max, getattr(self, "if_quantiles", None))
+        norm_oc = self._normalize_score(s_oc_gated, self.oc_min, self.oc_max, getattr(self, "oc_quantiles", None))
 
-        fused_score = self.w_stage1 * norm_if + (1.0 - self.w_stage1) * norm_oc
+        # Soft Cascade Fusion:
+        # Gated samples combine Stage 1 and Stage 2 according to w_stage1.
+        # Non-gated samples keep their Stage 1 score directly (norm_if),
+        # eliminating the hard w_stage1 ceiling where non-gated samples could never exceed 0.40.
+        fused_score = np.where(
+            gated_mask,
+            self.w_stage1 * norm_if + (1.0 - self.w_stage1) * norm_oc,
+            norm_if,
+        )
         fused_score = np.nan_to_num(fused_score, nan=0.0, posinf=1.0, neginf=0.0)
         fused_score = np.clip(fused_score, 0.0, 1.0)
 
-        # Classification decision
-        labels = np.where(fused_score >= self.threshold, LABEL_ANOMALY, LABEL_NORMAL)
+        # Three-Way Classification Decision via Dual-Threshold Band
+        tau_l = getattr(self, "tau_low", self.threshold)
+        tau_h = getattr(self, "tau_high", self.threshold)
+
+        labels = np.full(n_samples, LABEL_UNCERTAIN, dtype=object)
+        labels[fused_score < tau_l] = LABEL_NORMAL
+        labels[fused_score >= tau_h] = LABEL_ANOMALY
+        if tau_l >= tau_h:
+            labels[fused_score < tau_h] = LABEL_NORMAL
+
+        status = np.where(labels == LABEL_UNCERTAIN, STATUS_UNCERTAIN, STATUS_CONFIDENT)
+        confidence_margin = np.abs(fused_score - self.threshold)
 
         return pd.DataFrame({
             "stage1_score": s_if,
             "stage2_score": stage2_scores,
             "anomaly_score": fused_score,
+            "confidence_margin": confidence_margin,
+            "prediction_status": status,
             "predicted_label": labels,
         })
 
@@ -304,8 +371,8 @@ class CascadeModel(BaseModel):
         self,
         X: Union[pd.DataFrame, np.ndarray],
         severity_weight: Union[float, np.ndarray, pd.Series] = 0.0,
-        alpha: float = 0.6,
-        beta: float = 0.4,
+        alpha: Optional[float] = None,
+        beta: Optional[float] = None,
     ) -> np.ndarray:
         """Predicts composite risk score (0.0 to 100.0) combining AI anomaly confidence and rule severity.
 
@@ -416,6 +483,9 @@ class CascadeModel(BaseModel):
             "gate_rate": self.gate_rate,
             "gate_threshold": self.gate_threshold,
             "threshold": self.threshold,
+            "uncertainty_margin": self.uncertainty_margin,
+            "tau_low": self.tau_low,
+            "tau_high": self.tau_high,
             "w_stage1": self.w_stage1,
             "threshold_percentile": self.threshold_percentile,
             "iforest_anomaly_threshold": self.gate_threshold,
@@ -425,14 +495,35 @@ class CascadeModel(BaseModel):
                 "if_max": self.if_max,
                 "oc_min": self.oc_min,
                 "oc_max": self.oc_max,
+                "if_quantiles": self.if_quantiles.tolist() if getattr(self, "if_quantiles", None) is not None else None,
+                "oc_quantiles": self.oc_quantiles.tolist() if getattr(self, "oc_quantiles", None) is not None else None,
             }
         }
-        with open(os.path.join(model_dir, "metadata.json"), "w") as f:
+
+        # Compute cryptographic artifact hashes & harden permissions (S2 defense)
+        from lsmp_ai.common.security import compute_file_sha256, secure_file_permissions, secure_directory_permissions
+        if_path = os.path.join(model_dir, "iforest.joblib")
+        oc_path = os.path.join(model_dir, "ocsvm.joblib")
+        secure_directory_permissions(model_dir, 0o750)
+        if os.path.exists(if_path):
+            secure_file_permissions(if_path, 0o640)
+        if os.path.exists(oc_path):
+            secure_file_permissions(oc_path, 0o640)
+
+        meta["artifact_hashes"] = {
+            "iforest.joblib": compute_file_sha256(if_path) if os.path.exists(if_path) else None,
+            "ocsvm.joblib": compute_file_sha256(oc_path) if os.path.exists(if_path) else None,
+        }
+
+        meta_file = os.path.join(model_dir, "metadata.json")
+        with open(meta_file, "w") as f:
             json.dump(meta, f, indent=4)
+        secure_file_permissions(meta_file, 0o640)
         logger.info(f"Saved CascadeModel and metadata to {model_dir}")
 
     def load(self, model_dir: str) -> 'CascadeModel':
         """Deserializes submodels and restores cascade state from directory.
+        Performs cryptographic SHA-256 verification before deserialization to prevent RCE.
 
         Args:
             model_dir (str): Path to model directory.
@@ -440,8 +531,31 @@ class CascadeModel(BaseModel):
         Returns:
             CascadeModel: Restored model instance (self).
         """
-        self.iforest_model.load(os.path.join(model_dir, "iforest.joblib"))
-        self.ocsvm_model.load(os.path.join(model_dir, "ocsvm.joblib"))
+        # Cryptographic artifact integrity verification before joblib.load()
+        manifest_path = os.path.join(model_dir, "manifest.json")
+        meta_path = os.path.join(model_dir, "metadata.json")
+        artifact_hashes = None
+        if os.path.exists(manifest_path):
+            try:
+                with open(manifest_path, "r") as f:
+                    artifact_hashes = json.load(f).get("artifact_hashes")
+            except Exception:
+                pass
+        if not artifact_hashes and os.path.exists(meta_path):
+            try:
+                with open(meta_path, "r") as f:
+                    artifact_hashes = json.load(f).get("artifact_hashes")
+            except Exception:
+                pass
+
+        sub_hashes = {}
+        if artifact_hashes:
+            from lsmp_ai.common.security import verify_artifacts_in_dir
+            sub_hashes = {k: v for k, v in artifact_hashes.items() if k in ("iforest.joblib", "ocsvm.joblib") and v}
+            verify_artifacts_in_dir(model_dir, sub_hashes)
+
+        self.iforest_model.load(os.path.join(model_dir, "iforest.joblib"), expected_hash=sub_hashes.get("iforest.joblib"))
+        self.ocsvm_model.load(os.path.join(model_dir, "ocsvm.joblib"), expected_hash=sub_hashes.get("ocsvm.joblib"))
 
         meta_path = os.path.join(model_dir, "metadata.json")
         if os.path.exists(meta_path):
@@ -451,6 +565,9 @@ class CascadeModel(BaseModel):
             self.gate_rate = float(meta.get("gate_rate", self.gate_rate))
             self.gate_threshold = float(meta.get("gate_threshold", meta.get("iforest_anomaly_threshold", self.gate_threshold)))
             self.threshold = float(meta.get("threshold", self.threshold))
+            self.uncertainty_margin = float(meta.get("uncertainty_margin", getattr(self, "uncertainty_margin", 0.05)))
+            self.tau_low = float(meta.get("tau_low", max(0.0, self.threshold - self.uncertainty_margin)))
+            self.tau_high = float(meta.get("tau_high", self.threshold))
             self.w_stage1 = float(meta.get("w_stage1", self.w_stage1))
             self.threshold_percentile = meta.get("threshold_percentile", self.threshold_percentile)
             self.anomaly_threshold = self.gate_threshold
@@ -461,6 +578,10 @@ class CascadeModel(BaseModel):
             self.if_max = float(norm.get("if_max", 1.0))
             self.oc_min = float(norm.get("oc_min", 0.0))
             self.oc_max = float(norm.get("oc_max", 1.0))
+            if norm.get("if_quantiles") is not None:
+                self.if_quantiles = np.asarray(norm["if_quantiles"], dtype=float)
+            if norm.get("oc_quantiles") is not None:
+                self.oc_quantiles = np.asarray(norm["oc_quantiles"], dtype=float)
 
         self.is_fitted = True
         logger.info(f"Successfully loaded CascadeModel from {model_dir}")

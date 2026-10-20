@@ -21,11 +21,18 @@ data:
     - global_active_ips
     - burst_rate
 
-  # Time window for sliding-window feature aggregation (minutes)
-  time_window_minutes: 1
+  # Feature schema version
+  feature_version: "v2"
+
+  # Time window for sliding-window feature aggregation (seconds)
+  window_seconds: 60
+  time_window_seconds: 60
+  time_window_minutes: 1  # Backwards compatibility alias
 
   # Temporal split ratio matching SME-kit: Train (60%) / Validation (20%) / Test (20%)
   split: [0.6, 0.2, 0.2]
+  scientific_split_scope: "per_source"
+  imputation_fit_scope: "train_benign_only"
   train_test_split_ratio: 0.6
 
   # Database table name mappings (must match schema.sql)
@@ -37,9 +44,11 @@ data:
 # File paths (used by build_features and data_loader)
 raw_data_path: "data/raw"
 processed_data_path: "data/processed"
+unlabeled_data_path: "data/unlabeled"
 external_data_path: "data/external"
 train_ratio: 0.6
 val_ratio: 0.2
 test_ratio: 0.2
-window_minutes: 60
-feature_version: "v1"
+window_seconds: 60  # Synchronized in seconds (60s)
+window_minutes: 1  # Backward compatibility alias
+feature_version: "v2"

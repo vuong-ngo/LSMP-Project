@@ -43,7 +43,7 @@ class IsolationForestModel(BaseModel):
                 all_params = {
                     "n_estimators": 200,
                     "max_samples": 256,
-                    "contamination": 0.05,
+                    "contamination": 0.02,
                     "random_state": 42,
                     "n_jobs": -1,
                 }
@@ -125,17 +125,28 @@ class IsolationForestModel(BaseModel):
             filepath (str): Destination file path.
         """
         joblib.dump(self.model, filepath)
+        from lsmp_ai.common.security import secure_file_permissions
+        secure_file_permissions(filepath, 0o640)
         logger.info(f"Saved Isolation Forest model to {filepath}")
 
-    def load(self, filepath: str) -> 'IsolationForestModel':
-        """Deserializes and restores model state from disk.
+    def load(self, filepath: str, expected_hash: Optional[str] = None) -> 'IsolationForestModel':
+        """Deserializes and restores model state from disk after verifying integrity.
 
         Args:
             filepath (str): Source file path.
+            expected_hash (Optional[str]): Optional expected SHA-256 digest.
 
         Returns:
             IsolationForestModel: Restored model instance (self).
         """
+        if expected_hash:
+            from lsmp_ai.common.security import verify_file_integrity
+            from lsmp_ai.common.exceptions import SecurityError
+            if not verify_file_integrity(filepath, expected_hash):
+                raise SecurityError(
+                    f"Security integrity check FAILED for '{filepath}'! "
+                    "Deserialization aborted to prevent arbitrary code execution (RCE)."
+                )
         self.model = joblib.load(filepath)
         logger.info(f"Loaded Isolation Forest model from {filepath}")
         return self
