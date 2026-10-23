@@ -15,7 +15,28 @@ logger = setup_logger(__name__)
 
 # ===== PAIRED T-TEST FUNCTION =====
 def paired_t_test(scores_a: np.ndarray, scores_b: np.ndarray) -> dict:
-    t_stat, p_value = ttest_rel(scores_a, scores_b)
+    a = np.asarray(scores_a, dtype=float)
+    b = np.asarray(scores_b, dtype=float)
+    if len(a) != len(b):
+        raise ValueError("scores_a and scores_b must have the same length")
+    if len(a) == 0:
+        return {
+            "test": "Paired t-test",
+            "t_statistic": 0.0,
+            "p_value": 1.0,
+            "significant": False,
+        }
+    diff = a - b
+    if np.all(diff == 0):
+        return {
+            "test": "Paired t-test",
+            "t_statistic": 0.0,
+            "p_value": 1.0,
+            "significant": False,
+        }
+    t_stat, p_value = ttest_rel(a, b)
+    if np.isnan(p_value):
+        t_stat, p_value = 0.0, 1.0
     return {
         "test": "Paired t-test",
         "t_statistic": float(t_stat),
@@ -26,7 +47,31 @@ def paired_t_test(scores_a: np.ndarray, scores_b: np.ndarray) -> dict:
 
 # ===== WILCOXON SIGNED-RANK FUNCTION =====
 def wilcoxon_signed_rank(scores_a: np.ndarray, scores_b: np.ndarray) -> dict:
-    stat, p_value = wilcoxon(scores_a, scores_b, alternative="two-sided")
+    a = np.asarray(scores_a, dtype=float)
+    b = np.asarray(scores_b, dtype=float)
+    if len(a) != len(b):
+        raise ValueError("scores_a and scores_b must have the same length")
+    if len(a) == 0:
+        return {
+            "test": "Wilcoxon Signed-Rank",
+            "statistic": 0.0,
+            "p_value": 1.0,
+            "significant": False,
+        }
+    diff = a - b
+    if np.all(diff == 0):
+        return {
+            "test": "Wilcoxon Signed-Rank",
+            "statistic": 0.0,
+            "p_value": 1.0,
+            "significant": False,
+        }
+    try:
+        stat, p_value = wilcoxon(a, b, alternative="two-sided")
+    except ValueError:
+        stat, p_value = 0.0, 1.0
+    if np.isnan(p_value):
+        stat, p_value = 0.0, 1.0
     return {
         "test": "Wilcoxon Signed-Rank",
         "statistic": float(stat),
