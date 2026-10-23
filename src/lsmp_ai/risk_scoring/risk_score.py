@@ -122,6 +122,8 @@ def compute_risk_scores_for_df(
     if df.empty or "anomaly_score" not in df.columns:
         return df
 
+    df = df.copy()
+
     anomaly_scores = df["anomaly_score"].values
     severity_weights = df["severity_weight"].values if "severity_weight" in df.columns else 0.0
 
@@ -135,8 +137,21 @@ def compute_risk_scores_for_df(
     df["risk_score"] = risk_vals
     df["score"] = risk_vals
 
-    alpha_val = alpha if alpha is not None else 0.6
-    beta_val = beta if beta is not None else 0.4
-    df["ai_component"] = alpha_val * df["anomaly_score"].values
-    df["rule_component"] = beta_val * calibrate_wazuh_severity(severity_weights)
+    def_alpha = 0.6
+    def_beta = 0.4
+    if config and hasattr(config, "risk_params") and config.risk_params:
+        def_alpha = float(config.risk_params.get("alpha", def_alpha))
+        def_beta = float(config.risk_params.get("beta", def_beta))
+
+    alpha_val = alpha if alpha is not None else def_alpha
+    beta_val = beta if beta is not None else def_beta
+    total_w = alpha_val + beta_val
+    if total_w > 0:
+        norm_alpha = alpha_val / total_w
+        norm_beta = beta_val / total_w
+    else:
+        norm_alpha, norm_beta = 0.5, 0.5
+
+    df["ai_component"] = norm_alpha * df["anomaly_score"].values
+    df["rule_component"] = norm_beta * calibrate_wazuh_severity(severity_weights)
     return df
