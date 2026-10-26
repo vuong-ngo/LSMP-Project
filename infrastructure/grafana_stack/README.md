@@ -137,7 +137,37 @@ bash generate_certs.sh
 ```bash
 bash generate_certs.sh --domain loki.yourdomain.com --extra-ip <SERVER_B_IP>
 ```
-*Expected output:* Generates `certs/ca.crt`, `certs/loki_gateway.crt`, and `certs/loki_gateway.key`. Verifies chain as `100% VALID`.
+
+> [!NOTE]
+> If Docker previously created the `certs/` directory with `root` ownership, ensure write permission before running:
+> ```bash
+> sudo chown -R $(id -u):$(id -g) certs
+> ```
+
+*Expected output:*
+```text
+=================================================================
+🔒  LSMP SECURITY: GENERATING TLS CERTS FOR LOKI GATEWAY
+=================================================================
+🔑 [1/4] Generating new LSMP Root CA (certs/ca.key, certs/ca.crt)...
+✅ Root CA generated at .../certs/ca.crt
+🌐 [2/4] Auto-detecting host network addresses for SANs...
+🔐 [3/4] Generating Loki Gateway Private Key (certs/loki_gateway.key)...
+📝 Preparing Subject Alternative Names (SANs) configuration...
+🛡️  Signing Loki Gateway Server Certificate (certs/loki_gateway.crt)...
+Certificate request self-signature ok
+subject=C=VN, ST=Hanoi, L=Hanoi, O=LSMP Security, OU=Grafana Loki Gateway, CN=gateway
+🔍 [4/4] Verifying generated certificate against Root CA...
+certs/loki_gateway.crt: OK
+✅ Certificate chain is 100% VALID!
+=================================================================
+✅ LOKI GATEWAY TLS CERTIFICATES READY!
+-----------------------------------------------------------------
+📍 Certs Directory : .../grafana_stack/certs
+📄 Server Cert     : .../grafana_stack/certs/loki_gateway.crt
+🔑 Server Key      : .../grafana_stack/certs/loki_gateway.key
+📜 Root CA Cert    : .../grafana_stack/certs/ca.crt
+```
 
 ### Step 3: Start the Stack
 Spin up all services in detached mode:
@@ -245,3 +275,15 @@ docker compose down -v
 ```
 > [!CAUTION]
 > The `-v` flag permanently removes the `data_seaweedfs` volume. All stored logs and compaction metadata will be permanently erased.
+
+---
+
+## 🛠️ Common Troubleshooting
+
+| Issue Symptom | Root Cause | Resolution |
+|---|---|---|
+| `generate_certs.sh` fails with `Permission denied` | Directory `certs/` was created by Docker with `root:root` ownership | Run `sudo chown -R $(id -u):$(id -g) certs` and re-run `bash generate_certs.sh --force`. |
+| Nginx gateway fails: `cannot load certificate ... loki_gateway.crt` | Stack was started before generating certificates | Run `bash generate_certs.sh` to generate keys and certificates, then restart gateway: `docker compose up -d gateway`. |
+| Fluent-Bit client TLS verification fails | Client does not have Loki's `ca.crt` or host IP is not in SANs | Copy `certs/ca.crt` to client's `certs/ca.crt`, and ensure `generate_certs.sh --extra-ip <SERVER_IP>` was used. |
+| Port `3100` or `3000` already allocated | Existing service occupying host ports | Inspect conflicting process with `sudo lsof -i :3100` or `sudo ss -tulpn | grep 3100`. |
+
