@@ -18,11 +18,12 @@ from sqlalchemy import text
 from lsmp_ai.common.logger import logger
 from lsmp_ai.common.config_loader import config
 from lsmp_ai.common.exceptions import ModelNotFoundError
-from lsmp_ai.io.db_client import DBClient
+from lsmp_ai.io.db_client import DBClient, validate_table_name
 from lsmp_ai.feature_engineering.feature_pipeline import FeaturePipeline, extract_features_from_logs
 from lsmp_ai.models.registry import ModelRegistry
-from lsmp_ai.risk_scoring.risk_score import calculate_risk_score
+from lsmp_ai.risk_scoring.risk_score import calculate_risk_score, calibrate_wazuh_severity
 from lsmp_ai.risk_scoring.risk_classifier import classify_risk_score
+from lsmp_ai.common.constants import LABEL_UNCERTAIN
 
 
 STATE_FILE = Path(__file__).resolve().parent.parent.parent.parent / "data" / "interim" / "serving_watermark.json"
@@ -105,7 +106,8 @@ def run_serve_pipeline(
     df_raw = pd.DataFrame()
 
     try:
-        table_name = config.db_tables.get('wazuh_alerts', 'log_event') if (config and hasattr(config, "db_tables") and config.db_tables) else 'log_event'
+        raw_table_name = config.db_tables.get('wazuh_alerts', 'log_event') if (config and hasattr(config, "db_tables") and config.db_tables) else 'log_event'
+        table_name = validate_table_name(raw_table_name)
         query = f"""
             SELECT * FROM {table_name}
             WHERE timestamp > :start_time AND timestamp <= :end_time
@@ -146,7 +148,7 @@ def run_serve_pipeline(
     if 'source_ip' in df_raw.columns:
         df_raw['src_ip'] = df_raw['source_ip']
 
-    # Extract 16 security features from raw alerts
+    # Extract 14 security features from raw alerts
     df_features = extract_features_from_logs(df_raw, window_start=start_time)
 
     if df_features.empty:
@@ -157,7 +159,7 @@ def run_serve_pipeline(
 
     # Persist feature vectors to feature_vectors table
     try:
-        db_client.write_feature_vectors(df_features)
+        df_features = db_client.write_feature_vectors(df_features)
     except Exception as fv_err:
         logger.warning(f"Could not persist feature vectors: {fv_err}")
 
@@ -250,14 +252,16 @@ def apply_decay_to_baseline_risk(db_client: DBClient, end_time: datetime) -> pd.
     except Exception:
         pass
 
-    # Save to database if connected
+    # Save to database only if there are active non-baseline transitions to avoid duplicate NULL accumulation
     if db_client.is_connected:
         try:
-            db_client.write_predictions(pd.DataFrame(), df_decay)
+            has_active_decay = any(float(r.get("score", 15.0)) > baseline_normal_score for r in decay_rows)
+            if has_active_decay:
+                db_client.write_predictions(pd.DataFrame(), df_decay)
         except Exception:
             pass
 
-    logger.info(f"🟢 Idle system: Decayed {len(df_decay)} host risk scores to baseline normal level (Low Risk < 25.0).")
+    logger.info(f"🟢 Idle system: Maintained baseline normal risk level (Low Risk < 25.0).")
     return df_decay
 
 
@@ -278,7 +282,7 @@ def _process_and_save_predictions(
     anomaly_rows = []
     risk_rows = []
 
-    for idx, row in df_features.iterrows():
+    for pos, (_, row) in enumerate(df_features.reset_index(drop=True).iterrows()):
         ip = row['src_ip']
 
         feature_dict = {}
@@ -298,20 +302,17 @@ def _process_and_save_predictions(
 
         event_id = str(ip_alerts.iloc[0]['event_id']) if (not ip_alerts.empty and 'event_id' in ip_alerts.columns and pd.notna(ip_alerts.iloc[0]['event_id'])) else None
         agent_id = str(ip_alerts.iloc[0]['agent_id']) if (not ip_alerts.empty and 'agent_id' in ip_alerts.columns and pd.notna(ip_alerts.iloc[0]['agent_id'])) else None
-        fv_id = str(row['id']) if ('id' in row and pd.notna(row['id'])) else None
+        fv_id = str(row['feature_vector_id']) if ('feature_vector_id' in row and pd.notna(row['feature_vector_id'])) else (str(row['id']) if ('id' in row and pd.notna(row['id'])) else None)
 
-        ip_detailed = df_detailed.iloc[idx]
+        ip_detailed = df_detailed.iloc[pos]
         anomaly_score = float(ip_detailed['anomaly_score'])
         predicted_label = str(ip_detailed['predicted_label'])
 
-        risk = calculate_risk_score(anomaly_score, max_severity)
-        risk_class = classify_risk_score(risk)
-
-        alpha = 0.6
-        beta = 0.4
-        if config and hasattr(config, "risk_params") and config.risk_params:
-            alpha = float(config.risk_params.get("alpha", alpha))
-            beta = float(config.risk_params.get("beta", beta))
+        # Three-Way Decision Policy: Flag and gate uncertain predictions
+        is_uncertain = (predicted_label == LABEL_UNCERTAIN)
+        if is_uncertain:
+            feature_dict["_review_required"] = True
+            feature_dict["_uncertainty_reason"] = "Anomaly score in decision boundary uncertainty band; deferred to SOC review."
 
         anomaly_rows.append({
             "id": anomaly_id,
@@ -327,17 +328,32 @@ def _process_and_save_predictions(
             "label_source": None
         })
 
-        risk_rows.append({
-            "id": risk_id,
-            "src_ip": ip,
-            "asset_id": agent_id,
-            "anomaly_result_id": anomaly_id,
-            "ai_component": alpha * anomaly_score,
-            "rule_component": beta * (min(max(max_severity, 0.0), 15.0) / 15.0),
-            "score": risk,
-            "risk_class": risk_class,
-            "timestamp": datetime.now(timezone.utc)
-        })
+        # Only generate actionable risk scores for confident predictions
+        if not is_uncertain:
+            risk = calculate_risk_score(anomaly_score, max_severity)
+            risk_class = classify_risk_score(risk)
+
+            alpha = 0.6
+            beta = 0.4
+            if config and hasattr(config, "risk_params") and config.risk_params:
+                alpha = float(config.risk_params.get("alpha", alpha))
+                beta = float(config.risk_params.get("beta", beta))
+            total_weight = alpha + beta
+            if total_weight > 0:
+                alpha = alpha / total_weight
+                beta = beta / total_weight
+
+            risk_rows.append({
+                "id": risk_id,
+                "src_ip": ip,
+                "asset_id": agent_id,
+                "anomaly_result_id": anomaly_id,
+                "ai_component": alpha * anomaly_score,
+                "rule_component": beta * float(calibrate_wazuh_severity(max_severity)),
+                "score": risk,
+                "risk_class": risk_class,
+                "timestamp": datetime.now(timezone.utc)
+            })
 
     df_anomaly = pd.DataFrame(anomaly_rows)
     df_risk = pd.DataFrame(risk_rows)
