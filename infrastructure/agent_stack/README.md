@@ -482,7 +482,8 @@ docker exec -it lsmp-redis redis-cli -a "<REDIS_PASSWORD>" XINFO CONSUMERS wazuh
 | Issue Symptom | Root Cause | Resolution |
 |---|---|---|
 | `lsmp-ingest` logs `401 Unauthorized` | Token mismatch between Server A and Server B | Re-run `bash generate_keys.sh --token <TOKEN>` on Server A with the token from Server B's `.env`. |
-| Fluent-Bit TLS handshake error | Hostname does not match certificate SAN IP/DNS | Re-run `bash generate_keys.sh --extra-ip <SERVER_B_IP>` on Server B and re-sync `ca.crt` to Server A. |
+| Fluent-Bit to Loki TLS handshake error | Client missing Loki Root CA or host IP not in SANs | Copy `grafana_stack/certs/ca.crt` from Server B to client's `certs/ca.crt` and ensure `generate_certs.sh --extra-ip <SERVER_B_IP>` was used on Server B. |
+| Fluent-Bit to Ingest TLS handshake error | Hostname does not match certificate SAN IP/DNS | Re-run `bash generate_keys.sh --extra-ip <SERVER_B_IP>` on Server B (`database_server`) and re-sync `ca.crt` to Server A. |
 | `network lsmp_backend not found` on Server A | `docker-compose.yml` on Server A references Server B's local bridge network | Remove `networks: [lsmp_backend]` on Server A; use standard Docker bridge. |
 | Wazuh Agent status is `disconnected` | Port `1514` closed on Server A firewall or wrong IP configured | Run `sudo ufw allow 1514/tcp` on Server A; check `/var/ossec/etc/ossec.conf` on client. |
 | Duplicate logs on container restart | DB tail offset volume not mounted | Ensure `fluent_bit_db` volume is mapped to `/fluent-bit/db/` in `docker-compose.yml`. |
