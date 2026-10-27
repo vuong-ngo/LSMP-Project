@@ -1,25 +1,37 @@
 # ============================================================================
 # file: docker-compose.yaml
-# description: Docker Compose file for setting up Grafana Loki distributed service.
+# Description: Docker Compose configuration for Grafana Loki distributed stack.
+#              Includes Loki Read/Write/Backend, SeaweedFS, Prometheus, Node Exporter,
+#              Grafana, Alloy, and Nginx Gateway with TLS.
 # ============================================================================
 
 ---
+# ====== Reusable Configurations (Extension Fields) ======
+x-s3-env: &s3-env
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID is required}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY is required}
+
+# ====== Networks Configuration ======
 networks:
   loki:
 
+# ====== Services Configuration ======
 services:
-  # ===== Grafana Loki Distributed Service Configuration =====
+  # ====== Loki Read Service (Query Engine) ======
   read:
     image: grafana/loki:${LOKI_VERSION:-latest}
-    command: "-config.file=/etc/loki/config.yaml -target=read"
-    ports:
-      - 3101:3100
-      - 7946
-      - 9095
+    command: "-config.file=/etc/loki/config.yaml -config.expand-env=true -target=read"
+    environment:
+      <<: *s3-env
+    restart: unless-stopped
+    expose:
+      - "3100"
+      - "7946"
+      - "9095"
     volumes:
       - ./config/loki-config.yaml:/etc/loki/config.yaml
     depends_on:
-      - minio
+      - seaweedfs
     healthcheck:
       test: [ "CMD", "/usr/bin/loki", "-health" ]
       start_period: 30s
@@ -31,14 +43,17 @@ services:
         aliases:
           - loki
 
-  # ===== Grafana Loki Distributed Service Configuration =====
+  # ====== Loki Write Service (Ingester & Distributor) ======
   write:
     image: grafana/loki:${LOKI_VERSION:-latest}
-    command: "-config.file=/etc/loki/config.yaml -target=write"
-    ports:
-      - 3102:3100
-      - 7946
-      - 9095
+    command: "-config.file=/etc/loki/config.yaml -config.expand-env=true -target=write"
+    environment:
+      <<: *s3-env
+    restart: unless-stopped
+    expose:
+      - "3100"
+      - "7946"
+      - "9095"
     volumes:
       - ./config/loki-config.yaml:/etc/loki/config.yaml
     healthcheck:
@@ -48,14 +63,15 @@ services:
       timeout: 5s
       retries: 5
     depends_on:
-      - minio
+      - seaweedfs
     networks:
       <<: *loki-dns
 
-  # ===== Grafana Alloy Service Configuration =====
+  # ====== Grafana Alloy (Telemetry Collector & Shipper) ======
   alloy:
-    image: grafana/alloy:${ALLOY_VERSION:-latest}
+    image: grafana/alloy:${ALLOY_VERSION:-v1.2.1}
     container_name: alloy
+    restart: unless-stopped
     pid: host
     volumes:
       - ./config/alloy-local-config.yaml:/etc/alloy/config.alloy:ro
@@ -64,44 +80,39 @@ services:
       - /sys:/host/sys:ro
       - /:/host/root:ro
       - /var/log:/var/log:ro
+      - /run/udev:/run/udev:ro
     command: run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
-    ports:
-      - 12345:12345
+    expose:
+      - "12345"
     depends_on:
       - gateway
     networks:
       - loki
 
-  # ===== MinIO Service Configuration =====
-  minio:
-    image: minio/minio:${MINIO_VERSION:-latest}
-    entrypoint:
-      - sh
-      - -euc
-      - |
-        mkdir -p /data/loki-data && \
-        mkdir -p /data/loki-ruler && \
-        minio server /data
+  # ====== SeaweedFS (S3 Object Storage for Loki Chunks & Indexes) ======
+  seaweedfs:
+    image: chrislusf/seaweedfs:${SEAWEEDFS_VERSION:-latest}
+    restart: unless-stopped
+    command: "server -dir=/data -s3 -s3.port=8333"
     environment:
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
-      - MINIO_PROMETHEUS_AUTH_TYPE=public
-      - MINIO_UPDATE=off
-    ports:
-      - 9000
+      <<: *s3-env
+    expose:
+      - "8333"
+      - "9333"
     volumes:
-      - data_minio:/data
+      - data_seaweedfs:/data
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
-      interval: 15s
-      timeout: 20s
+      test: [ "CMD-SHELL", "curl -f http://localhost:9333/dir/status || exit 1" ]
+      interval: 10s
+      timeout: 5s
       retries: 5
+      start_period: 10s
     networks:
       - loki
 
-  # ===== Node Exporter Service Configuration =====
+  # ====== Node Exporter (Host System Metrics Exporter) ======
   node-exporter:
-    image: prom/node-exporter:${NODE_EXPORTER_VERSION:-latest}
+    image: prom/node-exporter:${NODE_EXPORTER_VERSION:-v1.8.0}
     container_name: node-exporter
     restart: always
     pid: host
@@ -113,59 +124,40 @@ services:
       - '--path.procfs=/host/proc'
       - '--path.sysfs=/host/sys'
       - '--path.rootfs=/rootfs'
-    ports:
-      - "9100:9100"
+    expose:
+      - "9100"
     networks:
       - loki
 
-  # ===== Prometheus Service Configuration =====
+  # ====== Prometheus Server (Metrics Collection & Storage) ======
   prometheus:
-    image: prom/prometheus:${PROMETHEUS_VERSION:-latest}
+    image: prom/prometheus:${PROMETHEUS_VERSION:-v2.51.1}
     container_name: prometheus
     restart: always
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
       - '--web.enable-remote-write-receiver'
-    ports:
-      - "9090:9090"
+    expose:
+      - "9090"
     volumes:
       - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     networks:
       - loki
 
+  # ====== Grafana (Visualization Platform & Dashboards) ======
   grafana:
     image: grafana/grafana:${GRAFANA_VERSION}
+    restart: unless-stopped
     environment:
       - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
       - GF_AUTH_ANONYMOUS_ENABLED=true
-      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
     depends_on:
       - gateway
       - prometheus
-    entrypoint:
-      - sh
-      - -euc
-      - |
-        mkdir -p /etc/grafana/provisioning/datasources
-        cat <<EOF > /etc/grafana/provisioning/datasources/ds.yaml
-        apiVersion: 1
-        datasources:
-          - name: Loki
-            type: loki
-            access: proxy
-            url: http://gateway:3100
-            jsonData:
-              httpHeaderName1: "X-Scope-OrgID"
-            secureJsonData:
-              httpHeaderValue1: "tenant1"
-          - name: Prometheus
-            type: prometheus
-            access: proxy
-            url: http://prometheus:9090
-            isDefault: false
-        EOF
-        /run.sh
+    volumes:
+      - ./config/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/ds.yaml:ro
     ports:
       - "3000:3000"
     healthcheck:
@@ -176,15 +168,18 @@ services:
     networks:
       - loki
 
-  # ===== Grafana Loki Distributed Service Configuration =====
+  # ====== Loki Backend Service (Compactor, Ruler & Index Gateway) ======
   backend:
     image: grafana/loki:${LOKI_VERSION:-latest}
+    restart: unless-stopped
     volumes:
       - ./config/loki-config.yaml:/etc/loki/config.yaml
-    ports:
+    expose:
       - "3100"
       - "7946"
-    command: "-config.file=/etc/loki/config.yaml -target=backend -legacy-read-mode=false"
+    command: "-config.file=/etc/loki/config.yaml -config.expand-env=true -target=backend -legacy-read-mode=false"
+    environment:
+      <<: *s3-env
     depends_on:
       - gateway
     healthcheck:
@@ -196,66 +191,16 @@ services:
     networks:
       - loki
     
-  # ===== Nginx Gateway Service Configuration =====
+  # ====== Nginx Gateway (Reverse Proxy & TLS Termination) ======
   gateway:
     image: nginx:${NGINX_VERSION:-latest}
+    restart: unless-stopped
     depends_on:
       - read
       - write
-    entrypoint:
-      - sh
-      - -euc
-      - |
-        cat <<EOF > /etc/nginx/nginx.conf
-        user  nginx;
-        worker_processes  5;  ## Default: 1
-
-        events {
-          worker_connections   1000;
-        }
-
-        http {
-          resolver 127.0.0.11;
-
-          server {
-            listen             3100;
-
-            location = / {
-              return 200 'OK';
-              auth_basic off;
-            }
-
-            location = /api/prom/push {
-              proxy_pass       http://write:3100\$$request_uri;
-            }
-
-            location = /api/prom/tail {
-              proxy_pass       http://read:3100\$$request_uri;
-              proxy_set_header Upgrade \$$http_upgrade;
-              proxy_set_header Connection "upgrade";
-            }
-
-            location ~ /api/prom/.* {
-              proxy_pass       http://read:3100\$$request_uri;
-            }
-
-            location = /loki/api/v1/push {
-              proxy_pass       http://write:3100\$$request_uri;
-            }
-
-            location = /loki/api/v1/tail {
-              proxy_pass       http://read:3100\$$request_uri;
-              proxy_set_header Upgrade \$$http_upgrade;
-              proxy_set_header Connection "upgrade";
-            }
-
-            location ~ /loki/api/.* {
-              proxy_pass       http://read:3100\$$request_uri;
-            }
-          }
-        }
-        EOF
-        /docker-entrypoint.sh nginx -g "daemon off;"
+    volumes:
+      - ./config/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
     ports:
       - "3100:3100"
     healthcheck:
@@ -266,12 +211,6 @@ services:
     networks:
       - loki
   
-  # ===== Flog Service Configuration =====
-  flog:
-    image: mingrammer/flog:${FLOG_VERSION:-latest}
-    command: -f json -d 200ms -l
-    networks:
-      - loki
-
+# ====== Persistent Storage Volumes ======
 volumes:
-  data_minio:
+  data_seaweedfs:
