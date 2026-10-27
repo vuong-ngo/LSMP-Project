@@ -3,17 +3,19 @@
 # Description: Prometheus Server configuration to scrape host metrics (Node Exporter).
 # ============================================================================
 
+# ====== Global Configuration ======
 global:
   scrape_interval: 5s
   evaluation_interval: 5s
 
+# ====== Scrape Configurations ======
 scrape_configs:
-  # Standard Host Node Exporter (CPU, RAM, Disk, Network metrics)
+  # ====== Scrape Job: Host Node Exporter (CPU, RAM, Disk, Network metrics) ======
   - job_name: 'node_exporter'
     static_configs:
       - targets: ['node-exporter:9100']
 
-  # Alloy Process Metrics
+  # ====== Scrape Job: Alloy Process Metrics ======
   - job_name: 'alloy_metrics'
     static_configs:
       - targets: ['alloy:12345']
