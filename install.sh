@@ -40,11 +40,12 @@ check_cmd pip3 || check_cmd pip || { echo -e "${RED}[✘] pip is required. Pleas
 # Step 2: Initialize Local Environment Configuration (.env)
 echo -e "\n${YELLOW}[Step 2/5] Initializing Local Configuration (.env)...${NC}"
 if [ ! -f "$PROJECT_ROOT/.env" ]; then
+    RANDOM_PASS=$(openssl rand -hex 12 2>/dev/null || date +%s | sha256sum | head -c 24)
     cat <<EOF > "$PROJECT_ROOT/.env"
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=postgres
+POSTGRES_USER=lsmp_admin
+POSTGRES_PASSWORD=${RANDOM_PASS}
 POSTGRES_DB=lsmp_db
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/lsmp_db
+DATABASE_URL=postgresql://lsmp_admin:${RANDOM_PASS}@localhost:5432/lsmp_db
 MODEL_VERSION=cascade-v1.0
 MODEL_DIR=$PROJECT_ROOT/models_store
 LOG_LEVEL=INFO
@@ -53,7 +54,7 @@ POLLING_INTERVAL_SECONDS=10
 RISK_ALPHA=0.6
 RISK_BETA=0.4
 EOF
-    echo -e "  [✔] Generated default .env configuration."
+    echo -e "  [✔] Generated secure .env configuration with random credentials."
 else
     echo -e "  [✔] Found existing .env configuration."
 fi
@@ -74,8 +75,8 @@ export PATH="$PROJECT_ROOT/.venv/bin:$PATH"
 echo -e "  [i] Upgrading pip & installing dependencies..."
 pip install --quiet -e "$PROJECT_ROOT[all]"
 
-# Step 4: Install System CLI (lsmp-ai) & TUI (lsmp-tui) Binaries
-echo -e "\n${YELLOW}[Step 4/5] Installing 'lsmp-ai' CLI & 'lsmp-tui' Binaries into ~/.local/bin...${NC}"
+# Step 4: Install System CLI (lsmp-ai) Binary
+echo -e "\n${YELLOW}[Step 4/5] Installing 'lsmp-ai' CLI Binary into ~/.local/bin...${NC}"
 BIN_DIR="$HOME/.local/bin"
 mkdir -p "$BIN_DIR"
 
@@ -83,13 +84,6 @@ if [ -f "$PROJECT_ROOT/.venv/bin/lsmp-ai" ]; then
     ln -sf "$PROJECT_ROOT/.venv/bin/lsmp-ai" "$BIN_DIR/lsmp-ai"
     echo -e "  [✔] Linked 'lsmp-ai' binary to $BIN_DIR/lsmp-ai"
 fi
-
-cat <<EOF > "$BIN_DIR/lsmp-tui"
-#!/usr/bin/env bash
-exec "$PROJECT_ROOT/.venv/bin/python" "$PROJECT_ROOT/tools/lsmp_tui.py" "\$@"
-EOF
-chmod +x "$BIN_DIR/lsmp-tui"
-echo -e "  [✔] Created 'lsmp-tui' executable in $BIN_DIR/lsmp-tui"
 
 # Step 5: Verification Unit Tests
 echo -e "\n${YELLOW}[Step 5/5] Running Verification Unit Tests...${NC}"
@@ -111,10 +105,7 @@ echo -e "     - Evaluate Model:        lsmp-ai evaluate"
 echo -e "     - Check System Health:   lsmp-ai healthcheck"
 echo -e "     - Threat Summary Report: lsmp-ai threat-summary"
 echo ""
-echo -e "  📌 ${BLUE}Interactive TUI Dashboard:${NC}"
-echo -e "     - Launch TUI Dashboard:  lsmp-tui"
-echo ""
 echo -e "  📌 ${BLUE}Local Service Control:${NC}"
-echo -e "     - Start Background Daemon: ./scripts/start_service.sh"
-echo -e "     - Stop Background Daemon:  ./scripts/stop_service.sh"
+echo -e "     - Start Background Daemon: lsmp-ai serve start"
+echo -e "     - Stop Background Daemon:  lsmp-ai serve stop"
 echo "=========================================================================="
