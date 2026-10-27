@@ -19,10 +19,20 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 try:
+    from dotenv import load_dotenv
+    _env_p = PROJECT_ROOT / ".env"
+    if _env_p.exists():
+        load_dotenv(_env_p)
+    else:
+        load_dotenv()
+except ImportError:
+    pass
+
+try:
     from sqlalchemy import create_engine, text
 except ImportError:
     print("❌ SQLAlchemy is not installed. Installing required dependencies...")
-    os.system("pip install sqlalchemy psycopg2-binary redis pandas numpy rich")
+    os.system("pip install sqlalchemy psycopg2-binary pandas numpy")
     from sqlalchemy import create_engine, text
 
 # Sample datasets for realistic log generation
@@ -152,7 +162,14 @@ def main():
     
     args = parser.parse_args()
 
-    db_url = args.db_url or os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL") or "postgresql://postgres:postgres@localhost:5432/lsmp_db"
+    db_url = args.db_url or os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL")
+    if not db_url:
+        user = os.getenv("POSTGRES_USER", "lsmp_admin")
+        pwd = os.getenv("POSTGRES_PASSWORD", "postgres")
+        host = os.getenv("POSTGRES_HOST", "localhost")
+        port = os.getenv("POSTGRES_PORT", "5432")
+        db = os.getenv("POSTGRES_DB", "lsmp_db")
+        db_url = f"postgresql://{user}:{pwd}@{host}:{port}/{db}"
 
     print("=" * 70)
     print("🚀 LSMP - RANDOM WAZUH LOG GENERATOR & DATABASE POPULATOR")
