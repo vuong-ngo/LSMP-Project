@@ -16,15 +16,13 @@ if str(BASE_DIR / "src") not in sys.path:
 
 try:
     import psutil
-    from rich.console import Console
-    from rich.table import Table
-    from rich.panel import Panel
 except ImportError:
-    pass
+    psutil = None
 
 from lsmp_ai.common.logger import setup_logger
 from lsmp_ai.models.registry import ModelRegistry
 from lsmp_ai.common.constants import FEATURE_COLUMNS
+from lsmp_ai.version import __version__
 
 logger = setup_logger(__name__)
 
@@ -91,53 +89,49 @@ def audit_model_health() -> tuple[dict, bool]:
 
 
 def main():
-    console = Console()
-    console.print(Panel("[bold cyan]🤖 LSMP AI Model Engine & System Resource Health Audit[/bold cyan]", border_style="cyan"))
+    print("=" * 70)
+    print(f"🤖 LSMP AI Model Engine & System Resource Health Audit ({__version__})")
+    print("=" * 70)
 
     health_data, is_model_ok = audit_model_health()
 
-    t_model = Table(title="📦 Active Model & Inference Performance Audit", show_header=True, header_style="bold blue")
-    t_model.add_column("Property / Metric", style="bold white")
-    t_model.add_column("Value / Status", justify="right", style="cyan")
-
+    print("\n📦 Active Model & Inference Performance Audit:")
+    print("-" * 70)
     if is_model_ok:
-        t_model.add_row("Model Version", f"[bold yellow]{health_data['model_version']}[/bold yellow]")
-        t_model.add_row("Model Accuracy", f"{health_data['accuracy']*100:.2f}%")
-        t_model.add_row("Model Precision", f"{health_data['precision']*100:.2f}%")
-        t_model.add_row("Model Recall", f"{health_data['recall']*100:.2f}%")
-        t_model.add_row("Model F1-Score", f"{health_data['f1_score']*100:.2f}%")
-        t_model.add_row("Model ROC-AUC", f"{health_data['roc_auc']:.4f}")
-        t_model.add_row("Throughput (EPS)", f"[bold green]{health_data['throughput_eps']:,.1f} Events/sec[/bold green]")
-        t_model.add_row("Avg Latency", f"[bold green]{health_data['latency_ms']:.3f} ms / log[/bold green]")
+        print(f"  • Model Version:        {health_data['model_version']}")
+        print(f"  • Model Accuracy:       {health_data['accuracy']*100:.2f}%")
+        print(f"  • Model Precision:      {health_data['precision']*100:.2f}%")
+        print(f"  • Model Recall:         {health_data['recall']*100:.2f}%")
+        print(f"  • Model F1-Score:       {health_data['f1_score']*100:.2f}%")
+        print(f"  • Model ROC-AUC:        {health_data['roc_auc']:.4f}")
+        print(f"  • Throughput (EPS):     {health_data['throughput_eps']:,.1f} Events/sec")
+        print(f"  • Avg Latency:          {health_data['latency_ms']:.3f} ms / log")
     else:
-        t_model.add_row("Model Status", f"[bold red]{health_data.get('error', 'Error')}[/bold red]")
+        print(f"  • Model Status:         {health_data.get('error', 'Error')}")
 
-    console.print(t_model)
+    print("\n💻 System Hardware & Memory Resource Audit:")
+    print("-" * 70)
+    if psutil:
+        try:
+            cpu_pct = psutil.cpu_percent(interval=0.2)
+            mem = psutil.virtual_memory()
+            disk = psutil.disk_usage(str(BASE_DIR))
 
-    t_res = Table(title="💻 System Hardware & Memory Resource Audit", show_header=True, header_style="bold yellow")
-    t_res.add_column("Resource", style="bold white")
-    t_res.add_column("Current Value", justify="right")
-    t_res.add_column("Threshold", justify="right", style="dim white")
-    t_res.add_column("Status", justify="right")
+            cpu_status = "OK" if cpu_pct < 85 else "HIGH"
+            mem_status = "OK" if mem.percent < 90 else "HIGH"
+            disk_status = "OK" if disk.percent < 90 else "CRITICAL"
 
-    try:
-        cpu_pct = psutil.cpu_percent(interval=0.2)
-        mem = psutil.virtual_memory()
-        disk = psutil.disk_usage(str(BASE_DIR))
+            print(f"  • CPU Utilization:      {cpu_pct:.1f}% (Threshold: < 85.0%, Status: {cpu_status})")
+            print(f"  • RAM Memory Usage:     {mem.percent:.1f}% ({mem.used/(1024**3):.2f}/{mem.total/(1024**3):.2f} GB) (Status: {mem_status})")
+            if is_model_ok:
+                print(f"  • Process Memory RAM:   {health_data['ram_mb']:.1f} MB (Threshold: < 300 MB, Status: OK)")
+            print(f"  • Disk Space Available: {disk.percent:.1f}% ({disk.free/(1024**3):.2f} GB Free) (Status: {disk_status})")
+        except Exception as e:
+            print(f"  [!] Resource check warning: {e}")
+    else:
+        print("  • psutil is not available for hardware audit.")
 
-        cpu_status = "[bold green]OK[/bold green]" if cpu_pct < 85 else "[bold red]HIGH[/bold red]"
-        mem_status = "[bold green]OK[/bold green]" if mem.percent < 90 else "[bold red]HIGH[/bold red]"
-        disk_status = "[bold green]OK[/bold green]" if disk.percent < 90 else "[bold red]CRITICAL[/bold red]"
-
-        t_res.add_row("CPU Utilization", f"{cpu_pct:.1f}%", "< 85.0%", cpu_status)
-        t_res.add_row("RAM Memory Usage", f"{mem.percent:.1f}% ({mem.used/(1024**3):.2f}/{mem.total/(1024**3):.2f} GB)", "< 90.0%", mem_status)
-        if is_model_ok:
-            t_res.add_row("Process Memory Footprint", f"{health_data['ram_mb']:.1f} MB RAM", "< 300 MB", "[bold green]OK[/bold green]")
-        t_res.add_row("Disk Space Available", f"{disk.percent:.1f}% ({disk.free/(1024**3):.2f} GB Free)", "< 90.0%", disk_status)
-    except Exception:
-        pass
-
-    console.print(t_res)
+    print("=" * 70)
 
 
 if __name__ == "__main__":

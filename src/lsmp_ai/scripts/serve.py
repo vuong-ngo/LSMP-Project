@@ -22,6 +22,7 @@ if str(BASE_DIR / "src") not in sys.path:
 from lsmp_ai.common.logger import setup_logger
 from lsmp_ai.common.config_loader import config
 from lsmp_ai.pipeline.serve_pipeline import run_serve_pipeline, get_last_watermark
+from lsmp_ai.version import __version__
 
 logger = setup_logger(__name__)
 
@@ -86,7 +87,7 @@ def start_serving_daemon(interval: int = 10, lookback_minutes: int = 60) -> None
         sys.exit(1)
 
     print("=================================================================")
-    print("🚀 STARTING LSMP AI REAL-TIME SERVING DAEMON (PURE PYTHON)")
+    print(f"🚀 STARTING LSMP AI REAL-TIME SERVING DAEMON ({__version__})")
     print("=================================================================")
     print(f"  • Polling Interval: {interval} seconds")
     print(f"  • Log File:         {SERVICE_LOG}")
@@ -103,7 +104,16 @@ def start_serving_daemon(interval: int = 10, lookback_minutes: int = 60) -> None
     with open(SERVICE_LOG, "a") as log_out:
         proc = subprocess.Popen(cmd, cwd=str(BASE_DIR), stdout=log_out, stderr=log_out, env=env)
 
+    PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(PID_FILE.parent, 0o750)
+    except Exception:
+        pass
     PID_FILE.write_text(str(proc.pid))
+    try:
+        os.chmod(PID_FILE, 0o600)
+    except Exception:
+        pass
     time.sleep(2)
 
     if proc.poll() is None:
@@ -119,7 +129,7 @@ def start_serving_daemon(interval: int = 10, lookback_minutes: int = 60) -> None
 
 
 def stop_serving_daemon() -> None:
-    """Stops the running real-time serving daemon smoothly."""
+    """Stops the running real-time serving daemon smoothly with process identity verification (S10 defense)."""
     print("=================================================================")
     print("🛑 STOPPING LSMP AI REAL-TIME SERVING DAEMON")
     print("=================================================================")
@@ -130,6 +140,15 @@ def stop_serving_daemon() -> None:
             pid = int(PID_FILE.read_text().strip())
             import psutil
             if psutil.pid_exists(pid):
+                proc = psutil.Process(pid)
+                # Verify that the target PID belongs to an LSMP serving process before killing
+                cmdline = " ".join(proc.cmdline()).lower()
+                if "lsmp" not in cmdline and "serve" not in cmdline and "uvicorn" not in cmdline:
+                    print(f"⚠️ Security Error: PID {pid} does not match an LSMP service process (cmd: {cmdline}).")
+                    print("Aborting termination to prevent killing unrelated system processes.")
+                    PID_FILE.unlink(missing_ok=True)
+                    return
+
                 print(f"Stopping daemon process (PID: {pid})...")
                 os.kill(pid, signal.SIGTERM)
                 time.sleep(1)
@@ -142,6 +161,7 @@ def stop_serving_daemon() -> None:
         except Exception as e:
             print(f"Warning while stopping process: {e}")
         PID_FILE.unlink(missing_ok=True)
+
 
     if stopped:
         print("✅ LSMP AI Real-time Service stopped successfully.")

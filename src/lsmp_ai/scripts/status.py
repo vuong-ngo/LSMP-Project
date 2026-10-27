@@ -26,8 +26,9 @@ logger = setup_logger(__name__)
 
 def show_program_status() -> dict:
     """Inspects and displays operational parameters of the active LSMP AI Engine."""
+    from lsmp_ai.version import __version__
     print("=" * 80)
-    print("📋 LSMP AI ENGINE — OPERATIONAL PROGRAM & MODEL PARAMETER STATUS")
+    print(f"📋 LSMP AI ENGINE — OPERATIONAL PROGRAM & MODEL PARAMETER STATUS ({__version__})")
     print("=" * 80)
 
     status_data = {}
@@ -76,6 +77,8 @@ def show_program_status() -> dict:
 
     # 2. Feature Dimension Info
     print("\n📐 [FEATURE VECTOR PIPELINE]")
+    feat_ver = getattr(config, "feature_version", "v2") if config else "v2"
+    print(f"  • Feature Version:             {feat_ver}")
     print(f"  • Total AI Feature Dimension:  {len(FEATURE_COLUMNS)} Features")
     print(f"  • Feature Names:               {', '.join(FEATURE_COLUMNS[:5])} ... ({len(FEATURE_COLUMNS)-5} more)")
 
@@ -87,7 +90,7 @@ def show_program_status() -> dict:
         try:
             from lsmp_ai.io.db_client import DBClient
             db_client = DBClient()
-            tables = ["log_event", "feature_vectors", "anomaly_result", "risk_score", "evaluation_metrics"]
+            tables = ["log_event", "feature_vectors", "anomaly_result", "risk_score", "attack_scenarios", "evaluation_metrics"]
             existing = []
             with db_client.engine.connect() as conn:
                 from sqlalchemy import inspect
@@ -136,7 +139,7 @@ def show_program_status() -> dict:
     low_t = float(c_p.get("low_threshold", 25.0))
     med_t = float(c_p.get("medium_threshold", 50.0))
     high_t = float(c_p.get("high_threshold", 80.0))
-    print(f"  • Risk Formula: RiskScore = 100 * [ {alpha:.2f} * AI_Score + {beta:.2f} * Wazuh_Severity/15.0 ]")
+    print(f"  • Risk Formula: RiskScore = 100 * [ {alpha:.2f} * AI_Score + {beta:.2f} * Calibrated_Wazuh_Severity ]")
     print(f"  • Risk Classes: Low (< {low_t}), Medium (< {med_t}), High (< {high_t}), Critical (>= {high_t})")
     print("=" * 80)
 

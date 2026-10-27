@@ -8,6 +8,7 @@ import sys
 import json
 import argparse
 from pathlib import Path
+from typing import Optional, Union
 import pandas as pd
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent
@@ -20,7 +21,7 @@ from lsmp_ai.io.db_client import DBClient
 logger = setup_logger(__name__)
 
 
-def export_models_to_db(db_url: str = None) -> bool:
+def export_models_to_db(db_url: str = None, catalog_path: Optional[Union[str, Path]] = None) -> bool:
     """Syncs all registered model catalog versions and evaluation metrics into PostgreSQL/TimescaleDB."""
     print("=" * 80)
     print("🚀 EXPORTING ALL REGISTERED MODEL VERSIONS & METRICS TO DATABASE")
@@ -32,14 +33,17 @@ def export_models_to_db(db_url: str = None) -> bool:
         print("❌ [DATABASE ERROR] DATABASE_URL is not set. Please export DATABASE_URL variable or set in .env")
         return False
 
-    models_dir = BASE_DIR / "models_store"
-    catalog_path = models_dir / "catalog.json"
+    if catalog_path:
+        cat_p = Path(catalog_path)
+    else:
+        models_dir = BASE_DIR / "models_store"
+        cat_p = models_dir / "catalog.json"
 
-    if not catalog_path.exists():
-        print(f"⚠️ [CATALOG WARNING] No catalog.json found at {catalog_path}. Train a model first using `lsmp-ai train`.")
+    if not cat_p.exists():
+        print(f"⚠️ [CATALOG WARNING] No catalog.json found at {cat_p}. Train a model first using `lsmp-ai train`.")
         return False
 
-    with open(catalog_path, "r") as f:
+    with open(cat_p, "r") as f:
         catalog = json.load(f)
 
     exported_count = 0
