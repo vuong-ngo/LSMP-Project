@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lsmp-ai"
-version = "1.0.0"
+version = "1.0.1"
 description = "LSMP AI - Log Anomaly Detection & Serving Engine"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -15,13 +15,14 @@ authors = [
 dependencies = [
     "numpy>=1.24.0",
     "pandas>=2.0.0",
+    "scipy>=1.10.0",
     "scikit-learn>=1.3.0",
     "sqlalchemy>=2.0.0",
     "psycopg2-binary>=2.9.6",
     "pyyaml>=6.0",
     "joblib>=1.3.0",
-    "typer>=0.9.0",
-    "python-dotenv>=1.0.0"
+    "python-dotenv>=1.0.0",
+    "psutil>=5.9.0"
 ]
 
 [project.optional-dependencies]
@@ -30,9 +31,8 @@ serving = [
     "uvicorn[standard]>=0.20.0",
     "pydantic>=2.0.0"
 ]
-tui = [
-    "rich>=13.0.0",
-    "psutil>=5.9.0"
+tools = [
+    "paramiko>=3.0.0"
 ]
 test = [
     "pytest>=7.0.0",
@@ -42,7 +42,7 @@ all = [
     "fastapi>=0.100.0",
     "uvicorn[standard]>=0.20.0",
     "pydantic>=2.0.0",
-    "rich>=13.0.0",
+    "paramiko>=3.0.0",
     "psutil>=5.9.0",
     "pytest>=7.0.0",
     "httpx>=0.24.0"
@@ -56,8 +56,13 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
 filterwarnings = [
     "ignore::DeprecationWarning:joblib.*",
     "ignore:X does not have valid feature names:UserWarning",
-    "ignore:Using `httpx` with `starlette.testclient` is deprecated:Warning"
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated:Warning",
+    "ignore:max_samples.*is greater than the total number of samples:UserWarning",
+    "ignore:Only one class is present in y_true:sklearn.exceptions.UndefinedMetricWarning",
+    "ignore:No positive class found in y_true:UserWarning",
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning"
 ]
