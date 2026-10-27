@@ -46,20 +46,23 @@ class EvaluatePipeline:
         else:
             df = self.data_loader.load_from_db()
 
+        from lsmp_ai.evaluation.metrics import to_binary_labels
+        lbl_col = "label" if "label" in df.columns else ("ground_truth_label" if "ground_truth_label" in df.columns else None)
+        y_binary = to_binary_labels(df[lbl_col]) if lbl_col else np.zeros(len(df), dtype=int)
+        for c in FEATURE_COLUMNS:
+            if c not in df.columns:
+                df[c] = 0.0
         X = df[FEATURE_COLUMNS].values
-        y = self.data_loader.prepare_labels(df["label"])
 
         # One-Class split: Train = Pure Benign, Test = remaining Benign + all Anomaly
-        from lsmp_ai.common.constants import LABEL_NORMAL, LABEL_ANOMALY
-        y_arr = np.asarray(y)
-        normal_mask = (y_arr == 0)  # 0 = Normal after prepare_labels
-        anomaly_mask = (y_arr == 1)  # 1 = Anomaly
+        normal_mask = (y_binary == 0)
+        anomaly_mask = (y_binary == 1)
 
         if normal_mask.any() and anomaly_mask.any():
             X_normal = X[normal_mask]
-            y_normal = y_arr[normal_mask]
+            y_normal = y_binary[normal_mask]
             X_anomaly = X[anomaly_mask]
-            y_anomaly = y_arr[anomaly_mask]
+            y_anomaly = y_binary[anomaly_mask]
 
             split_idx = int(len(X_normal) * self.data_config.train_ratio)
             X_train = X_normal[:split_idx]
@@ -68,7 +71,7 @@ class EvaluatePipeline:
             y_test = np.concatenate([y_normal[split_idx:], y_anomaly])
         else:
             X_train, X_test, y_train, y_test = train_test_split(
-                X, y,
+                X, y_binary,
                 test_size=(1 - self.data_config.train_ratio),
                 random_state=42,
             )
@@ -94,12 +97,15 @@ class EvaluatePipeline:
             "gamma": self.model_config.ocsvm.gamma[0],
         }
 
+        cascade_threshold = getattr(self.model_config.cascade, "threshold_percentile", [80])
+        if isinstance(cascade_threshold, list):
+            cascade_threshold = cascade_threshold[0] if cascade_threshold else 80
         results = run_ablation_study(
             X_train, X_test, y_test,
             y_train=y_train,
             iforest_params=iforest_params,
             ocsvm_params=ocsvm_params,
-            cascade_threshold=self.model_config.cascade.threshold_percentile,
+            cascade_threshold=cascade_threshold,
         )
 
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -107,9 +113,10 @@ class EvaluatePipeline:
         logger.info(f"Results saved to {output_path}")
 
         # Persist metrics to evaluation_metrics database table
-        if self.result_writer and "Cascade iForest→OCSVM" in results.index:
+        cascade_key = next((k for k in ["Cascade iForest→OCSVM", "Cascade (iForest->OCSVM)"] if k in results.index), None)
+        if self.result_writer and cascade_key:
             try:
-                cascade_metrics = results.loc["Cascade iForest→OCSVM"].to_dict()
+                cascade_metrics = results.loc[cascade_key].to_dict()
                 self.result_writer.write_metrics(
                     metrics_dict=cascade_metrics,
                     model_config="cascade_iforest_ocsvm",
