@@ -15,7 +15,7 @@ import redis
 from datetime import datetime, timezone
 from sqlalchemy import create_engine, text
 
-# Setup logging
+# ====== Logging Configuration ======
 logging.basicConfig(
     level=logging.INFO,
     format='[%(asctime)s] %(levelname)s [%(name)s:%(lineno)d]: %(message)s',
@@ -23,7 +23,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("wazuh-db-writer")
 
-# Environment Configurations
+# ====== Environment & Stream Configurations ======
 REDIS_HOST = os.getenv("REDIS_HOST", "lsmp-redis")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
@@ -35,9 +35,11 @@ CONSUMER_NAME = os.getenv("HOSTNAME", "writer_1")
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", 500))
 BATCH_TIMEOUT = float(os.getenv("BATCH_TIMEOUT", 2.0))
 
+# ====== IP Validation Regex ======
 # IP validation regex for PostgreSQL INET type
 IP_PATTERN = re.compile(r'^(\d{1,3}\.){3}\d{1,3}$|^([0-9a-fA-F]{1,4}:){1,7}[0-9a-fA-F]{1,4}$')
 
+# ====== Database & Redis Initialization ======
 def init_db_and_redis():
     """Initializes Redis stream consumer group and PostgreSQL database connection."""
     logger.info(f"Connecting to Redis at {REDIS_HOST}:{REDIS_PORT}")
@@ -67,6 +69,7 @@ def init_db_and_redis():
 
     return r, engine
 
+# ====== Wazuh Alert Parser & Schema Mapping ======
 def parse_wazuh_alert(raw_data: str) -> dict:
     """Parses raw Wazuh 4.x alert JSON and maps it to log_event schema fields accurately."""
     try:
@@ -164,6 +167,7 @@ def parse_wazuh_alert(raw_data: str) -> dict:
         logger.error(f"Error parsing raw Wazuh 4.x alert: {e}")
         return None
 
+# ====== Database Operations (PostgreSQL Batch Insert) ======
 def write_to_postgres(engine, batch: list) -> bool:
     """Executes optimized batch inserts to PostgreSQL with row-by-row fallback."""
     if not batch:
@@ -193,6 +197,7 @@ def write_to_postgres(engine, batch: list) -> bool:
         logger.info(f"Rescued {success_count}/{len(batch)} alerts row-by-row.")
         return success_count > 0
 
+# ====== Main Worker Loop ======
 def main():
     try:
         r, engine = init_db_and_redis()
@@ -265,5 +270,6 @@ def main():
             logger.error(f"Error in main polling loop: {e}")
             time.sleep(2)
 
+# ====== Application Entrypoint ======
 if __name__ == "__main__":
     main()

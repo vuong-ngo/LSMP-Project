@@ -1,3 +1,9 @@
+# ============================================================================
+# file: parsers.conf.bak
+# Description: Default backup parsers configuration for Fluent Bit.
+# ============================================================================
+
+# ====== Apache Combined Parser ======
 [PARSER]
     Name   apache
     Format regex
@@ -5,6 +11,7 @@
     Time_Key time
     Time_Format %d/%b/%Y:%H:%M:%S %z
 
+# ====== Apache2 Parser ======
 [PARSER]
     Name   apache2
     Format regex
@@ -12,11 +19,13 @@
     Time_Key time
     Time_Format %d/%b/%Y:%H:%M:%S %z
 
+# ====== Apache Error Log Parser ======
 [PARSER]
     Name   apache_error
     Format regex
     Regex  ^\[[^ ]* (?<time>[^\]]*)\] \[(?<level>[^\]]*)\](?: \[pid (?<pid>[^\]]*)\])?( \[client (?<client>[^\]]*)\])? (?<message>.*)$
 
+# ====== Nginx Access Log Parser ======
 [PARSER]
     Name   nginx
     Format regex
@@ -24,6 +33,7 @@
     Time_Key time
     Time_Format %d/%b/%Y:%H:%M:%S %z
 
+# ====== Kubernetes Nginx Ingress Parser ======
 [PARSER]
     # https://rubular.com/r/IhIbCAIs7ImOkc
     Name        k8s-nginx-ingress
@@ -32,16 +42,19 @@
     Time_Key    time
     Time_Format %d/%b/%Y:%H:%M:%S %z
 
+# ====== JSON Parser ======
 [PARSER]
     Name   json
     Format json
     Time_Key time
     Time_Format %d/%b/%Y:%H:%M:%S %z
 
+# ====== Logfmt Parser ======
 [PARSER]
     Name   logfmt
     Format logfmt
 
+# ====== Docker Container Log Parser ======
 [PARSER]
     Name         docker
     Format       json
@@ -57,6 +70,7 @@
     # =============|==================|=================
     #Decode_Field_As    json     log
 
+# ====== Docker Daemon Log Parser ======
 [PARSER]
     Name        docker-daemon
     Format      regex
@@ -65,6 +79,7 @@
     Time_Format %Y-%m-%dT%H:%M:%S.%L
     Time_Keep   On
 
+# ====== Syslog RFC5424 Parser ======
 [PARSER]
     Name        syslog-rfc5424
     Format      regex
@@ -73,6 +88,7 @@
     Time_Format %Y-%m-%dT%H:%M:%S.%L%z
     Time_Keep   On
 
+# ====== Syslog RFC3164 Local Parser ======
 [PARSER]
     Name        syslog-rfc3164-local
     Format      regex
@@ -81,6 +97,7 @@
     Time_Format %b %d %H:%M:%S
     Time_Keep   On
 
+# ====== Syslog RFC3164 Parser ======
 [PARSER]
     Name        syslog-rfc3164
     Format      regex
@@ -89,6 +106,7 @@
     Time_Format %b %d %H:%M:%S
     Time_Keep   On
 
+# ====== MongoDB Log Parser ======
 [PARSER]
     Name    mongodb
     Format  regex
@@ -97,6 +115,7 @@
     Time_Keep   On
     Time_Key time
 
+# ====== Envoy Proxy Access Log Parser ======
 [PARSER]
     # https://rubular.com/r/0VZmcYcLWMGAp1
     Name    envoy
@@ -106,6 +125,7 @@
     Time_Keep   On
     Time_Key start_time
 
+# ====== Istio Envoy Proxy Parser ======
 [PARSER]
     # https://rubular.com/r/hbsTIxFFMozLmh
     Name    istio-envoy-proxy
@@ -115,6 +135,7 @@
     Time_Keep   On
     Time_Key start_time
 
+# ====== Kubernetes CRI Parser ======
 [PARSER]
     # http://rubular.com/r/tjUt3Awgg4
     Name cri
@@ -124,11 +145,13 @@
     Time_Format %Y-%m-%dT%H:%M:%S.%L%z
     Time_Keep   On
 
+# ====== Kubernetes Custom Log Parser ======
 [PARSER]
     Name    kube-custom
     Format  regex
     Regex   (?<tag>[^.]+)?\.?(?<pod_name>[a-z0-9](?:[-a-z0-9]*[a-z0-9])?(?:\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)_(?<namespace_name>[^_]+)_(?<container_name>.+)-(?<docker_id>[a-z0-9]{64})\.log$
 
+# ====== Linux Kernel Netfilter Log Parser ======
 [PARSER]
     # Examples: TCP: https://rubular.com/r/Q8YY6fHqlqwGI0  UDP: https://rubular.com/r/B0ID69H9FvN0tp
     Name    kmsg-netfilter-log

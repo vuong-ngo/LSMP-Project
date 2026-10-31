@@ -15,12 +15,14 @@ ENV_EXAMPLE="${SCRIPT_DIR}/.env.example"
 DB_SERVER_CERTS="$(cd "${SCRIPT_DIR}/../database_server" 2>/dev/null && pwd)/certs"
 DB_SERVER_ENV="$(cd "${SCRIPT_DIR}/../database_server" 2>/dev/null && pwd)/.env"
 
+# ====== Configuration & Defaults ======
 TOKEN=""
 TARGET_HOST=""
 TARGET_PORT=""
 CA_CERT_SRC=""
 FORCE_UPDATE=false
 
+# ====== Help & Usage Information ======
 show_help() {
     echo "Usage: bash generate_keys.sh [OPTIONS]"
     echo ""
@@ -34,7 +36,7 @@ show_help() {
     exit 0
 }
 
-# Parse arguments
+# ====== Parse CLI Arguments ======
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --token|-t)
@@ -72,7 +74,7 @@ echo "================================================================="
 
 mkdir -p "${CERTS_DIR}"
 
-# 1. Sync or Verify Root CA Certificate (ca.crt)
+# ====== Step 1: Sync or Verify Root CA Certificate (ca.crt) ======
 if [ -n "${CA_CERT_SRC}" ] && [ -f "${CA_CERT_SRC}" ]; then
     echo "📋 Copying provided Root CA Certificate from ${CA_CERT_SRC}..."
     cp "${CA_CERT_SRC}" "${CERTS_DIR}/ca.crt"
@@ -88,7 +90,7 @@ else
     exit 1
 fi
 
-# 2. Extract, Prompt, or Use Provided INGEST_TOKEN
+# ====== Step 2: Extract, Prompt, or Use Provided INGEST_TOKEN ======
 if [ -z "${TOKEN}" ] && [ -f "${DB_SERVER_ENV}" ]; then
     EXTRACTED_TOKEN=$(grep "^INGEST_TOKEN=" "${DB_SERVER_ENV}" 2>/dev/null | cut -d '=' -f2-)
     if [ -n "${EXTRACTED_TOKEN}" ] && [ "${EXTRACTED_TOKEN}" != "CHANGE_ME_RANDOM_LONG_SECRET" ]; then
@@ -117,7 +119,7 @@ if [ -z "${TOKEN}" ] || [ "${TOKEN}" = "CHANGE_ME_RANDOM_LONG_SECRET" ]; then
     exit 1
 fi
 
-# 3. Create or Update .env file for Wazuh Server
+# ====== Step 3: Create or Update Environment File (.env) ======
 echo "⚙️  Updating environment file (${ENV_FILE})..."
 if [ ! -f "${ENV_FILE}" ]; then
     if [ -f "${ENV_EXAMPLE}" ]; then
@@ -169,6 +171,8 @@ else
 fi
 
 chmod 644 "${CERTS_DIR}"/*.crt 2>/dev/null || true
+
+# ====== Step 4: Display Configuration Summary ======
 
 echo "================================================================="
 echo "✅ WAZUH SERVER FLUENT-BIT TLS SECURITY CONFIGURED!"
