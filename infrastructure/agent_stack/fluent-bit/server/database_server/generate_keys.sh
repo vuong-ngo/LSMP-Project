@@ -13,22 +13,32 @@ CERTS_DIR="${SCRIPT_DIR}/certs"
 ENV_FILE="${SCRIPT_DIR}/.env"
 ENV_EXAMPLE="${SCRIPT_DIR}/.env.example"
 
+# ====== Default Parameters & State ======
 TOKEN_ARG=""
 REDIS_PASS_ARG=""
 FORCE_REGEN=false
+EXTRA_DOMAINS=()
+EXTRA_IPS=()
 
+# ====== Help & Usage Information ======
 show_help() {
     echo "Usage: bash generate_keys.sh [OPTIONS]"
     echo ""
     echo "Options:"
     echo "  --token, -t <TOKEN>         Specify a custom INGEST_TOKEN (64-char hex recommended)"
     echo "  --redis-pass, -r <PASS>     Specify a custom REDIS_PASSWORD"
+    echo "  --domain, -d <DOMAIN>       Add extra DNS SAN to TLS cert (repeatable)"
+    echo "  --extra-ip, -i <IP>         Add extra IP SAN to TLS cert (repeatable)"
     echo "  --force, -f                 Force re-generation of TLS certificates and random tokens"
     echo "  --help, -h                  Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  bash generate_keys.sh --domain ingest.example.com --extra-ip 192.168.1.100"
+    echo "  bash generate_keys.sh -d server-b.local -i 10.0.0.5 -i 10.0.0.6"
     exit 0
 }
 
-# Parse CLI flags
+# ====== Parse CLI Arguments ======
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --token|-t)
@@ -42,6 +52,14 @@ while [[ $# -gt 0 ]]; do
         --force|-f)
             FORCE_REGEN=true
             shift
+            ;;
+        --domain|-d)
+            EXTRA_DOMAINS+=("$2")
+            shift 2
+            ;;
+        --extra-ip|-i)
+            EXTRA_IPS+=("$2")
+            shift 2
             ;;
         --help|-h)
             show_help
@@ -59,7 +77,7 @@ echo "================================================================="
 
 mkdir -p "${CERTS_DIR}"
 
-# 1. Determine INGEST_TOKEN and REDIS_PASSWORD
+# ====== Step 1: Determine Secrets & Passwords ======
 INGEST_TOKEN=""
 REDIS_PASSWORD=""
 
@@ -93,7 +111,7 @@ if [ -z "${REDIS_PASSWORD}" ]; then
     REDIS_PASSWORD=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 24)
 fi
 
-# 2. TLS Certificates Generation
+# ====== Step 2: TLS Certificates Generation ======
 if [ "${FORCE_REGEN}" = false ] && [ -f "${CERTS_DIR}/ca.crt" ] && [ -f "${CERTS_DIR}/ca.key" ] && [ -f "${CERTS_DIR}/lsmp_ingest.crt" ] && [ -f "${CERTS_DIR}/lsmp_ingest.key" ]; then
     echo "✅ Existing TLS Certificates found in ${CERTS_DIR}. Skipping certificate generation."
     echo "   (Use --force or -f to regenerate certificates)"
@@ -106,6 +124,27 @@ else
 
     echo "🔐 Generating LSMP Ingest Server Private Key (lsmp_ingest.key)..."
     openssl genrsa -out "${CERTS_DIR}/lsmp_ingest.key" 2048 2>/dev/null
+
+    # Build SAN config with base entries + any extra domains/IPs
+    SAN_CONTENT="[alt_names]
+DNS.1 = localhost
+DNS.2 = lsmp-ingest
+IP.1  = 127.0.0.1
+IP.2  = 0.0.0.0"
+
+    DNS_IDX=3
+    for domain in "${EXTRA_DOMAINS[@]}"; do
+        SAN_CONTENT="${SAN_CONTENT}
+DNS.${DNS_IDX} = ${domain}"
+        DNS_IDX=$((DNS_IDX + 1))
+    done
+
+    IP_IDX=3
+    for ip in "${EXTRA_IPS[@]}"; do
+        SAN_CONTENT="${SAN_CONTENT}
+IP.${IP_IDX} = ${ip}"
+        IP_IDX=$((IP_IDX + 1))
+    done
 
     cat <<EOF > "${CERTS_DIR}/san.cnf"
 [req]
@@ -126,11 +165,7 @@ CN = lsmp-ingest
 [req_ext]
 subjectAltName = @alt_names
 
-[alt_names]
-DNS.1 = localhost
-DNS.2 = lsmp-ingest
-IP.1  = 127.0.0.1
-IP.2  = 0.0.0.0
+${SAN_CONTENT}
 EOF
 
     openssl req -new -key "${CERTS_DIR}/lsmp_ingest.key" \
@@ -150,7 +185,7 @@ fi
 chmod 600 "${CERTS_DIR}"/*.key 2>/dev/null || true
 chmod 644 "${CERTS_DIR}"/*.crt 2>/dev/null || true
 
-# 3. Create or Update .env file for Database Server
+# ====== Step 3: Configure Environment File (.env) ======
 echo "⚙️  Updating environment file (${ENV_FILE})..."
 if [ ! -f "${ENV_FILE}" ]; then
     if [ -f "${ENV_EXAMPLE}" ]; then
@@ -185,6 +220,8 @@ if grep -q "^USE_TLS=" "${ENV_FILE}"; then
 else
     echo "USE_TLS=true" >> "${ENV_FILE}"
 fi
+
+# ====== Step 4: Display Summary & Instructions ======
 
 echo "================================================================="
 echo "✅ DATABASE SERVER SECURITY KEYS SUCCESSFULLY CONFIGURED!"

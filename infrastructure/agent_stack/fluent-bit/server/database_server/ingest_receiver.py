@@ -1,16 +1,19 @@
 # ============================================================================
 # file: database_server/ingest_receiver.py
-# description: Runs on the DATABASE & AI SERVER (Server B), colocated with lsmp-redis.
+# Description: HTTP Ingest Receiver service running on Server B (colocated with Redis).
+#              Receives Wazuh alerts via HTTP/HTTPS POST and pushes into Redis stream.
 # ============================================================================
 
 import os
 import sys
 import json
 import ssl
+import hmac
 import logging
 import redis
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+# ====== Logging Configuration ======
 logging.basicConfig(
     level=logging.INFO,
     format='[%(asctime)s] %(levelname)s [%(name)s]: %(message)s',
@@ -18,6 +21,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("lsmp-ingest")
 
+# ====== Environment & Server Configuration ======
 REDIS_HOST     = os.getenv("REDIS_HOST", "lsmp-redis")
 REDIS_PORT     = int(os.getenv("REDIS_PORT", 6379))
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
@@ -26,19 +30,20 @@ STREAM_MAXLEN  = int(os.getenv("STREAM_MAXLEN", 100000))
 LISTEN_PORT    = int(os.getenv("LISTEN_PORT", 8080))
 INGEST_TOKEN   = os.getenv("INGEST_TOKEN")  # Required, no default value
 
-# TLS / HTTPS Configuration
+# ====== TLS / HTTPS Configuration ======
 USE_TLS        = os.getenv("USE_TLS", "false").lower() in ("true", "1", "yes")
 SSL_CERT_FILE  = os.getenv("SSL_CERT_FILE", "/etc/ssl/certs/lsmp_ingest.crt")
 SSL_KEY_FILE   = os.getenv("SSL_KEY_FILE", "/etc/ssl/certs/lsmp_ingest.key")
 MAX_BODY_SIZE  = int(os.getenv("MAX_BODY_SIZE", 10 * 1024 * 1024))  # Default 10 MB payload limit
 
+# ====== Startup Validation & Redis Connection ======
 if not INGEST_TOKEN:
     logger.critical("INGEST_TOKEN is not set - refusing to start (to avoid exposing unauthenticated endpoints to the network).")
     sys.exit(1)
 
 redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD)
 
-
+# ====== HTTP Ingest Request Handler ======
 class IngestHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         logger.debug("%s - %s" % (self.address_string(), fmt % args))
@@ -53,7 +58,7 @@ class IngestHandler(BaseHTTPRequestHandler):
         # auth like Redis AUTH, so we implement this layer since the endpoint
         # is exposed over the network.
         token = self.headers.get("X-Ingest-Token")
-        if token != INGEST_TOKEN:
+        if not token or not hmac.compare_digest(token, INGEST_TOKEN):
             logger.warning(f"Rejected invalid request from {self.address_string()} (missing or incorrect token).")
             self.send_response(401)
             self.end_headers()
@@ -110,6 +115,7 @@ class IngestHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
 
+# ====== Server Initialization & Main Loop ======
 def main():
     logger.info(f"Connecting to Redis at {REDIS_HOST}:{REDIS_PORT}")
     try:
@@ -135,6 +141,7 @@ def main():
     server.serve_forever()
 
 
+# ====== Application Entrypoint ======
 if __name__ == "__main__":
     main()
 

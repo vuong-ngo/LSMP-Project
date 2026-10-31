@@ -14,15 +14,17 @@ CERTS_DIR="${SCRIPT_DIR}/certs"
 ENV_FILE="${SCRIPT_DIR}/.env"
 ENV_EXAMPLE="${SCRIPT_DIR}/.env.example"
 DB_SERVER_CERTS="$(cd "${SCRIPT_DIR}/../server/database_server" 2>/dev/null && pwd)/certs"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../.." 2>/dev/null && pwd)"
+GRAFANA_STACK_CERTS="${PROJECT_ROOT}/grafana_stack/certs"
 
-# Default CLI parameters
+# ====== Default CLI Parameters ======
 ARG_LOKI_HOST=""
 ARG_LOKI_PORT=""
 ARG_LOKI_USER=""
 ARG_LOKI_PASS=""
 ARG_CA_CERT=""
 
-# Parse CLI flags
+# ====== Parse CLI Arguments ======
 while [[ $# -gt 0 ]]; do
     case $1 in
         --loki-host)
@@ -57,26 +59,31 @@ echo "================================================================="
 
 mkdir -p "${CERTS_DIR}"
 
-# 1. Provision Root CA Certificate (ca.crt)
+# ====== Step 1: Provision Root CA Certificate (ca.crt) ======
 if [ -n "${ARG_CA_CERT}" ] && [ -f "${ARG_CA_CERT}" ]; then
     echo "📋 Copying provided Root CA Certificate from ${ARG_CA_CERT}..."
     cp "${ARG_CA_CERT}" "${CERTS_DIR}/ca.crt"
+elif [ -f "${GRAFANA_STACK_CERTS}/ca.crt" ]; then
+    echo "📋 Auto-syncing Root CA Certificate from local grafana_stack (${GRAFANA_STACK_CERTS}/ca.crt)..."
+    cp "${GRAFANA_STACK_CERTS}/ca.crt" "${CERTS_DIR}/ca.crt"
 elif [ -f "${DB_SERVER_CERTS}/ca.crt" ]; then
     echo "📋 Auto-syncing Root CA Certificate from local database_server..."
     cp "${DB_SERVER_CERTS}/ca.crt" "${CERTS_DIR}/ca.crt"
 elif [ -f "${CERTS_DIR}/ca.crt" ]; then
     echo "✅ Existing Root CA certificate found at ${CERTS_DIR}/ca.crt"
 else
-    echo "🔑 Generating self-signed Root CA certificate fallback for TLS..."
+    echo "⚠️  Warning: No Root CA certificate found."
+    echo "   In production, copy ca.crt from Server B (grafana_stack/certs/ca.crt) to ${CERTS_DIR}/ca.crt"
+    echo "   Generating a self-signed fallback Root CA..."
     openssl req -x509 -newkey rsa:4096 -nodes \
         -keyout "${CERTS_DIR}/ca.key" \
         -out "${CERTS_DIR}/ca.crt" \
         -days 3650 \
         -subj "/C=VN/ST=Hanoi/L=Hanoi/O=LSMP Security/OU=Client/CN=LSMP-Root-CA" 2>/dev/null
-    echo "✅ Self-signed Root CA generated at ${CERTS_DIR}/ca.crt"
+    echo "✅ Self-signed fallback Root CA generated at ${CERTS_DIR}/ca.crt"
 fi
 
-# 2. Configure .env File
+# ====== Step 2: Configure Environment File (.env) ======
 if [ ! -f "${ENV_FILE}" ]; then
     if [ -f "${ENV_EXAMPLE}" ]; then
         cp "${ENV_EXAMPLE}" "${ENV_FILE}"
@@ -96,7 +103,7 @@ EOF
     fi
 fi
 
-# Override variables if CLI arguments provided
+# ====== Step 3: Override Variables from CLI Arguments ======
 if [ -n "${ARG_LOKI_HOST}" ]; then
     sed -i "s|^LOKI_HOST=.*|LOKI_HOST=${ARG_LOKI_HOST}|" "${ENV_FILE}"
 fi
@@ -110,7 +117,7 @@ if [ -n "${ARG_LOKI_PASS}" ]; then
     sed -i "s|^LOKI_PASSWORD=.*|LOKI_PASSWORD=${ARG_LOKI_PASS}|" "${ENV_FILE}"
 fi
 
-# Ensure TLS flags are enabled
+# ====== Step 4: Ensure TLS Flags Enabled ======
 if grep -q "^ENABLE_TLS=" "${ENV_FILE}"; then
     sed -i "s|^ENABLE_TLS=.*|ENABLE_TLS=On|" "${ENV_FILE}"
 else
@@ -125,7 +132,7 @@ fi
 
 chmod 644 "${CERTS_DIR}"/*.crt 2>/dev/null || true
 
-# Display current configuration summary
+# ====== Step 5: Display Configuration Summary ======
 CURRENT_LOKI_HOST=$(grep "^LOKI_HOST=" "${ENV_FILE}" | cut -d '=' -f2)
 CURRENT_LOKI_PORT=$(grep "^LOKI_PORT=" "${ENV_FILE}" | cut -d '=' -f2)
 

@@ -53,16 +53,52 @@ Ensure Docker and Docker Compose (v2+) are installed on the client machine.
 
 ### 2. Provision Security Credentials & Environment
 
-Run the client setup script to initialize certificates and environment configuration:
+The Fluent-Bit client uses the trusted Root CA (`ca.crt`) from the Loki Gateway (Server B) to verify TLS connections when pushing logs to port `3100`.
+
+#### Option A: Single-Host (Dev / All-in-One Machine)
+When running on the same machine as `grafana_stack`, the script automatically detects and syncs `grafana_stack/certs/ca.crt`:
 
 ```bash
 bash generate_keys.sh
 ```
 
-If the client machine is deployed independently on a separate remote network:
-1. Copy `ca.crt` generated from the Database Server into `./certs/ca.crt`.
-2. Copy `.env.example` to `.env` and fill in your central server endpoints:
+*Expected output:*
+```text
+=================================================================
+🔒  LSMP SECURITY: CONFIGURING CLIENT AGENT TLS & GRAFANA LOKI
+=================================================================
+📋 Auto-syncing Root CA Certificate from local grafana_stack (.../grafana_stack/certs/ca.crt)...
+=================================================================
+✅ LSMP CLIENT FLUENT-BIT SECURE CONNECTION CONFIGURED!
+-----------------------------------------------------------------
+📍 Certs Directory : .../client/certs
+📜 Root CA File    : .../client/certs/ca.crt
+🌐 Grafana Loki    : https://127.0.0.1:3100
+=================================================================
+```
 
+#### Option B: Multi-Host (Remote Monitored Client Machine)
+When the client is deployed on a separate host/VM from Server B (Loki Gateway):
+
+1. Transfer `ca.crt` generated on Server B (`grafana_stack/certs/ca.crt`) to the client:
+   ```bash
+   mkdir -p certs
+   scp user@<SERVER_B_IP>:infrastructure/grafana_stack/certs/ca.crt ./certs/ca.crt
+   ```
+
+2. Run `generate_keys.sh` with connection parameters:
+   ```bash
+   bash generate_keys.sh --loki-host <SERVER_B_IP> --loki-port 3100 --ca-cert ./certs/ca.crt
+   ```
+
+*Available CLI Arguments:*
+* `--loki-host <IP/DNS>`: IP or domain of Server B Loki Gateway.
+* `--loki-port <PORT>`: External port for Loki Gateway (default: `3100`).
+* `--ca-cert <PATH>`: Explicit path to Root CA certificate.
+* `--loki-user <USER>`: Optional HTTP Basic Auth username.
+* `--loki-pass <PASS>`: Optional HTTP Basic Auth password.
+
+3. Verify `.env` configuration:
 ```env
 # IP/port of the central Grafana Loki server
 LOKI_HOST=192.168.1.100
@@ -70,7 +106,7 @@ LOKI_PORT=3100
 LOKI_USER=
 LOKI_PASSWORD=
 
-# TLS / Security Configuration
+# TLS / Security Configuration (Must be On)
 ENABLE_TLS=On
 TLS_VERIFY=On
 
@@ -102,7 +138,25 @@ Check shipping status and TLS connection:
 docker compose logs -f
 ```
 
-#### C. Stop the Agent Stack
+#### C. Verify End-to-End Log Shipping to Loki
+
+1. Generate a test authentication event on this host machine:
+```bash
+logger -p auth.warning -t sshd "Failed password for invalid user sec_auditor from 192.168.1.150 port 52341 ssh2"
+```
+
+2. Confirm Fluent-Bit forwarded the event to Loki:
+```bash
+docker logs --tail 25 lsmp-client-fluent-bit
+```
+*Expected output:* Shows active file offset increment and HTTP push to Loki returning `204 No Content` / `200 OK`.
+
+3. Query on Grafana (`http://<SERVER_B_IP>:3000`) in **Explore** using LogQL:
+```logql
+{job="auth_log"} |= "sec_auditor"
+```
+
+#### D. Stop the Agent Stack
 
 To stop the agent service:
 
